@@ -61,7 +61,7 @@ class MainActivity : Activity() {
     private var currentTab = "all" // "all", "analysis", "settings"
     private var selectedAnalysisCategory = "전체"
     private var currentQuery = ""
-    private var isAddFormVisible = false
+    private var isSearchExpanded = false
 
     // 임의 기간 필터 (null이면 전체 기간)
     private var filterStartMillis: Long? = null
@@ -77,6 +77,11 @@ class MainActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        setTheme(
+            if (isDark) android.R.style.Theme_Material_NoActionBar
+            else android.R.style.Theme_Material_Light_NoActionBar
+        )
         super.onCreate(savedInstanceState)
 
         rootLayout = LinearLayout(this).apply {
@@ -93,14 +98,14 @@ class MainActivity : Activity() {
         headerTitleText = TextView(this).apply {
             text = "💰 자동 가계부"
             setTextColor(Color.WHITE)
-            textSize = 19f
+            textSize = sp(19f)
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         headerLayout.addView(headerTitleText)
 
         headerBadgeText = TextView(this).apply {
-            textSize = 11f
+            textSize = sp(11f)
             setTypeface(null, Typeface.BOLD)
             setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
@@ -115,7 +120,7 @@ class MainActivity : Activity() {
         headerLayout.addView(headerBadgeText)
         rootLayout.addView(headerLayout)
 
-        // 2. 중앙 콘텐츠 호스트 (탭별 레이아웃 교체)
+        // 2. 중앙 콘텐츠 호스트
         contentHost = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -191,12 +196,14 @@ class MainActivity : Activity() {
         navDivider.setBackgroundColor(dividerColor)
         bottomNavBar.setBackgroundColor(bgNav)
 
+        headerTitleText.textSize = sp(19f)
         headerTitleText.text = when (currentTab) {
             "analysis" -> "📊 카테고리 · 기간 분석"
             "settings" -> "⚙️ 앱 설정"
             else -> "💰 자동 가계부"
         }
 
+        headerBadgeText.textSize = sp(11f)
         if (isNotificationGranted()) {
             headerBadgeText.text = "● 알림감지 ON"
             headerBadgeText.setTextColor(if (isDark) Color.parseColor("#A7F3D0") else Color.parseColor("#065F46"))
@@ -215,7 +222,7 @@ class MainActivity : Activity() {
                 val scroll = ScrollView(this)
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(dp(14), dp(14), dp(14), dp(24))
+                    setPadding(dp(14), dp(12), dp(14), dp(24))
                 }
                 renderAllTab(isDark, container)
                 scroll.addView(container)
@@ -248,8 +255,8 @@ class MainActivity : Activity() {
         )
 
         val pillActiveBg = if (isDark) Color.parseColor("#1A3B5C") else Color.parseColor("#DBEAFE")
-        val labelActiveColor = if (isDark) Color.parseColor("#8AB4F8") else Color.parseColor("#1D4ED8")
-        val labelInactiveColor = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val labelActiveColor = if (isDark) Color.parseColor("#93C5FD") else Color.parseColor("#1D4ED8")
+        val labelInactiveColor = if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#4B5563")
 
         for ((tabKey, iconEmoji, labelText) in tabs) {
             val isSelected = (currentTab == tabKey)
@@ -269,7 +276,7 @@ class MainActivity : Activity() {
 
             val iconPill = TextView(this).apply {
                 text = iconEmoji
-                textSize = 16f
+                textSize = sp(16f)
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(dp(58), dp(30))
                 background = if (isSelected) roundBg(pillActiveBg, 15) else null
@@ -278,16 +285,70 @@ class MainActivity : Activity() {
 
             val labelView = TextView(this).apply {
                 text = labelText
-                textSize = 12f
+                textSize = sp(12f)
                 gravity = Gravity.CENTER
                 setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
                 setTextColor(if (isSelected) labelActiveColor else labelInactiveColor)
-                setPadding(0, dp(4), 0, 0)
+                setPadding(0, dp(3), 0, 0)
             }
             tabItem.addView(labelView)
 
             bottomNavBar.addView(tabItem)
         }
+    }
+
+    // =========================================================================
+    // 다크 모드 최적화 어댑터 / 다이얼로그 유틸리티
+    // =========================================================================
+    private fun getDialogTheme(isDark: Boolean): Int {
+        return if (isDark) {
+            android.R.style.Theme_Material_Dialog_Alert
+        } else {
+            android.R.style.Theme_Material_Light_Dialog_Alert
+        }
+    }
+
+    private fun makeThemedSpinner(isDark: Boolean, items: List<String>, selectedIndex: Int = 0): Spinner {
+        val textColor = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
+        val dropBg = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
+        val boxBg = if (isDark) Color.parseColor("#374151") else Color.parseColor("#F3F4F6")
+
+        val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val tv = super.getView(position, convertView, parent) as TextView
+                tv.setTextColor(textColor)
+                tv.textSize = sp(14f)
+                tv.setPadding(dp(10), dp(10), dp(10), dp(10))
+                return tv
+            }
+
+            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val tv = super.getDropDownView(position, convertView, parent) as TextView
+                tv.setTextColor(textColor)
+                tv.setBackgroundColor(dropBg)
+                tv.textSize = sp(14f)
+                tv.setPadding(dp(14), dp(12), dp(14), dp(12))
+                return tv
+            }
+        }
+
+        return Spinner(this).apply {
+            this.adapter = adapter
+            background = roundBg(boxBg, 8)
+            if (selectedIndex in items.indices) {
+                setSelection(selectedIndex)
+            }
+        }
+    }
+
+    private fun styleDialogEditText(edit: EditText, isDark: Boolean) {
+        val textColor = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
+        val hintColor = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val boxBg = if (isDark) Color.parseColor("#374151") else Color.parseColor("#F3F4F6")
+        edit.setTextColor(textColor)
+        edit.setHintTextColor(hintColor)
+        edit.background = roundBg(boxBg, 8)
+        edit.setPadding(dp(12), dp(10), dp(12), dp(10))
     }
 
     // =========================================================================
@@ -349,16 +410,15 @@ class MainActivity : Activity() {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
         val chipBg = if (isDark) Color.parseColor("#374151") else Color.parseColor("#F3F4F6")
         val textPrimary = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
-        val textSecondary = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val textSecondary = if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#4B5563")
         val activeColor = Color.parseColor("#10B981")
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = roundBg(bgCard, 12)
-            setPadding(dp(if (compact) 10 else 12), dp(10), dp(if (compact) 10 else 12), dp(10))
+            setPadding(dp(if (compact) 8 else 10), dp(8), dp(if (compact) 8 else 10), dp(8))
         }
 
-        // 1줄: 빠른 기간 프리셋 (전체 / 오늘 / 이번달 / 7일)
         val presetRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -367,7 +427,7 @@ class MainActivity : Activity() {
         fun makePresetBtn(label: String, isActive: Boolean, onClick: () -> Unit): TextView {
             return TextView(this).apply {
                 text = label
-                textSize = if (compact) 11f else 12f
+                textSize = sp(if (compact) 11f else 12f)
                 gravity = Gravity.CENTER
                 setTypeface(null, if (isActive) Typeface.BOLD else Typeface.NORMAL)
                 setTextColor(if (isActive) Color.WHITE else textPrimary)
@@ -416,7 +476,6 @@ class MainActivity : Activity() {
         })
         card.addView(presetRow)
 
-        // 2줄: 임의 시작일 ~ 종료일 직접 선택 버튼
         val customRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -432,12 +491,12 @@ class MainActivity : Activity() {
 
         val startBtn = TextView(this).apply {
             text = startLabel
-            textSize = if (compact) 11f else 12f
+            textSize = sp(if (compact) 11f else 12f)
             gravity = Gravity.CENTER
-            setTextColor(if (filterStartMillis != null) activeColor else textSecondary)
+            setTextColor(if (filterStartMillis != null) Color.parseColor("#34D399") else textSecondary)
             setTypeface(null, if (filterStartMillis != null) Typeface.BOLD else Typeface.NORMAL)
             background = roundBg(chipBg, 8)
-            setPadding(dp(6), dp(7), dp(6), dp(7))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
                 val initCal = Calendar.getInstance().apply {
@@ -445,6 +504,7 @@ class MainActivity : Activity() {
                 }
                 DatePickerDialog(
                     this@MainActivity,
+                    getDialogTheme(isDark),
                     { _, y, m, d ->
                         val chosenStart = startOfDay(y, m, d)
                         filterStartMillis = chosenStart
@@ -462,19 +522,19 @@ class MainActivity : Activity() {
 
         val tildeView = TextView(this).apply {
             text = "~"
-            textSize = 13f
+            textSize = sp(13f)
             setTextColor(textSecondary)
             setPadding(dp(6), 0, dp(6), 0)
         }
 
         val endBtn = TextView(this).apply {
             text = endLabel
-            textSize = if (compact) 11f else 12f
+            textSize = sp(if (compact) 11f else 12f)
             gravity = Gravity.CENTER
-            setTextColor(if (filterEndMillis != null) activeColor else textSecondary)
+            setTextColor(if (filterEndMillis != null) Color.parseColor("#34D399") else textSecondary)
             setTypeface(null, if (filterEndMillis != null) Typeface.BOLD else Typeface.NORMAL)
             background = roundBg(chipBg, 8)
-            setPadding(dp(6), dp(7), dp(6), dp(7))
+            setPadding(dp(6), dp(6), dp(6), dp(6))
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
                 val initCal = Calendar.getInstance().apply {
@@ -482,6 +542,7 @@ class MainActivity : Activity() {
                 }
                 DatePickerDialog(
                     this@MainActivity,
+                    getDialogTheme(isDark),
                     { _, y, m, d ->
                         val chosenEnd = endOfDay(y, m, d)
                         filterEndMillis = chosenEnd
@@ -506,22 +567,22 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 1. [전체] 탭 (임의 기간 필터 + 요약 + 검색 + 직접 추가 + 전체 목록)
+    // 1. [전체] 탭 (슬림 상단 + 접이식 검색 + 팝업 직접 추가 + 전체 목록)
     // =========================================================================
     private fun renderAllTab(isDark: Boolean, container: LinearLayout) {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
-        val bgSubCard = if (isDark) Color.parseColor("#374151") else Color.parseColor("#F3F4F6")
+        val bgSubCard = if (isDark) Color.parseColor("#374151") else Color.parseColor("#E5E7EB")
         val textPrimary = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
-        val textSecondary = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val textSecondary = if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#4B5563")
         val incColor = if (isDark) Color.parseColor("#60A5FA") else Color.parseColor("#2563EB")
         val expColor = if (isDark) Color.parseColor("#F87171") else Color.parseColor("#DC2626")
 
-        // 임의 기간 선택 카드
+        // 1) 임의 기간 선택 카드
         val periodCard = buildPeriodFilterCard(isDark, compact = false).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(10) }
+            ).apply { bottomMargin = dp(8) }
         }
         container.addView(periodCard)
 
@@ -554,11 +615,8 @@ class MainActivity : Activity() {
             if (type == "inc") totalInc += amount else totalExp += amount
         }
 
-        // 요약 카드
-        val summaryTitle = buildString {
-            append(getPeriodDisplayLabel())
-            append(" 합계 (${filteredList.size}건)")
-        }
+        // 2) 요약 카드
+        val summaryTitle = "${getPeriodDisplayLabel()} 합계 (${filteredList.size}건)"
         container.addView(
             buildSummaryCard(
                 title = summaryTitle,
@@ -573,144 +631,182 @@ class MainActivity : Activity() {
             )
         )
 
-        // 검색 카드
-        val searchCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = roundBg(bgCard, 12)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+        // 3) 슬림 액션 바 (1줄로 [검색] + [직접 추가] 배치하여 공간 최소화)
+        val actionBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(10) }
+            ).apply { topMargin = dp(8) }
         }
 
-        val searchBoxRow = LinearLayout(this).apply {
+        val isSearchingOrOpen = isSearchExpanded || currentQuery.isNotEmpty()
+        val searchToggleBtn = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val searchInput = EditText(this).apply {
-            hint = "🔍 결제처, 품목, 내용 검색..."
-            setText(currentQuery)
-            setTextColor(textPrimary)
-            setHintTextColor(textSecondary)
-            textSize = 14f
-            isSingleLine = true
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val searchBtn = Button(this).apply {
-            text = "검색"
-            textSize = 13f
-            setTextColor(Color.WHITE)
-            background = roundBg(Color.parseColor("#10B981"), 8)
-            layoutParams = LinearLayout.LayoutParams(dp(56), dp(38)).apply { leftMargin = dp(6) }
+            gravity = Gravity.CENTER
+            background = roundBg(
+                if (isSearchingOrOpen) Color.parseColor("#065F46") else bgCard,
+                10
+            )
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(6)
+            }
             setOnClickListener {
-                val q = searchInput.text.toString().trim()
-                currentQuery = q
-                if (q.isNotEmpty()) {
-                    LedgerStorage.addSearchHistory(this@MainActivity, q)
-                }
+                isSearchExpanded = !isSearchExpanded
                 refreshUI()
             }
         }
-        val clearSearchBtn = Button(this).apply {
-            text = "초기화"
-            textSize = 12f
-            setTextColor(Color.parseColor("#6B7280"))
-            background = roundBg(Color.parseColor("#E5E7EB"), 8)
-            layoutParams = LinearLayout.LayoutParams(dp(58), dp(38)).apply { leftMargin = dp(4) }
-            setOnClickListener {
-                currentQuery = ""
-                refreshUI()
-            }
-        }
-        searchBoxRow.addView(searchInput)
-        searchBoxRow.addView(searchBtn)
-        searchBoxRow.addView(clearSearchBtn)
-        searchCard.addView(searchBoxRow)
 
-        val history = LedgerStorage.getSearchHistory(this)
-        if (history.isNotEmpty()) {
-            val historyScroll = HorizontalScrollView(this).apply {
-                isHorizontalScrollBarEnabled = false
+        val searchBtnLabel = TextView(this).apply {
+            text = if (currentQuery.isNotEmpty()) "🔍 \"$currentQuery\"" else if (isSearchExpanded) "🔍 검색 닫기" else "🔍 검색"
+            textSize = sp(13f)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(if (isSearchingOrOpen) Color.WHITE else textPrimary)
+            isSingleLine = true
+        }
+        searchToggleBtn.addView(searchBtnLabel)
+
+        if (currentQuery.isNotEmpty()) {
+            searchToggleBtn.addView(TextView(this).apply {
+                text = "  ✕"
+                textSize = sp(13f)
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#FCA5A5"))
+                setOnClickListener {
+                    currentQuery = ""
+                    isSearchExpanded = false
+                    refreshUI()
+                }
+            })
+        }
+        actionBar.addView(searchToggleBtn)
+
+        val addModalBtn = TextView(this).apply {
+            text = "➕ 내역 추가"
+            textSize = sp(13f)
+            gravity = Gravity.CENTER
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = roundBg(Color.parseColor("#10B981"), 10)
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener {
+                showManualAddDialog()
+            }
+        }
+        actionBar.addView(addModalBtn)
+        container.addView(actionBar)
+
+        // 4) 검색창 (버튼을 눌렀을 때만 슬림하게 펼쳐짐)
+        if (isSearchExpanded || currentQuery.isNotEmpty()) {
+            val searchBoxCard = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundBg(bgCard, 10)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { topMargin = dp(6) }
             }
-            val historyRow = LinearLayout(this).apply {
+
+            val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            historyRow.addView(TextView(this).apply {
-                text = "최근:"
-                setTextColor(textSecondary)
-                textSize = 11f
-                setPadding(0, 0, dp(6), 0)
-            })
-            for (word in history) {
-                historyRow.addView(TextView(this).apply {
-                    text = word
-                    setTextColor(textSecondary)
-                    textSize = 12f
-                    background = roundBg(bgSubCard, 12)
-                    setPadding(dp(10), dp(4), dp(10), dp(4))
+            val searchInput = EditText(this).apply {
+                hint = "결제처, 품목, 내용 입력..."
+                setText(currentQuery)
+                textSize = sp(13f)
+                isSingleLine = true
+                styleDialogEditText(this, isDark)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val goBtn = TextView(this).apply {
+                text = "검색"
+                textSize = sp(13f)
+                gravity = Gravity.CENTER
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                background = roundBg(Color.parseColor("#10B981"), 8)
+                setPadding(dp(14), dp(9), dp(14), dp(9))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = dp(6) }
+                setOnClickListener {
+                    val q = searchInput.text.toString().trim()
+                    currentQuery = q
+                    if (q.isNotEmpty()) {
+                        LedgerStorage.addSearchHistory(this@MainActivity, q)
+                    }
+                    refreshUI()
+                }
+            }
+            row.addView(searchInput)
+            row.addView(goBtn)
+            searchBoxCard.addView(row)
+
+            val history = LedgerStorage.getSearchHistory(this)
+            if (history.isNotEmpty()) {
+                val historyScroll = HorizontalScrollView(this).apply {
+                    isHorizontalScrollBarEnabled = false
                     layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.WRAP_CONTENT
-                    ).apply { rightMargin = dp(6) }
+                    ).apply { topMargin = dp(6) }
+                }
+                val historyRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                historyRow.addView(TextView(this).apply {
+                    text = "최근:"
+                    setTextColor(textSecondary)
+                    textSize = sp(11f)
+                    setPadding(0, 0, dp(6), 0)
+                })
+                for (word in history) {
+                    historyRow.addView(TextView(this).apply {
+                        text = word
+                        setTextColor(textPrimary)
+                        textSize = sp(11f)
+                        background = roundBg(bgSubCard, 12)
+                        setPadding(dp(9), dp(3), dp(9), dp(3))
+                        layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        ).apply { rightMargin = dp(5) }
+                        setOnClickListener {
+                            currentQuery = word
+                            refreshUI()
+                        }
+                    })
+                }
+                historyRow.addView(TextView(this).apply {
+                    text = "삭제"
+                    setTextColor(Color.parseColor("#F87171"))
+                    textSize = sp(11f)
+                    setPadding(dp(4), dp(3), dp(4), dp(3))
                     setOnClickListener {
-                        currentQuery = word
+                        LedgerStorage.clearSearchHistory(this@MainActivity)
                         refreshUI()
                     }
                 })
+                historyScroll.addView(historyRow)
+                searchBoxCard.addView(historyScroll)
             }
-            historyRow.addView(TextView(this).apply {
-                text = "기록삭제"
-                setTextColor(Color.parseColor("#EF4444"))
-                textSize = 11f
-                setPadding(dp(6), dp(4), dp(6), dp(4))
-                setOnClickListener {
-                    LedgerStorage.clearSearchHistory(this@MainActivity)
-                    refreshUI()
-                }
-            })
-            historyScroll.addView(historyRow)
-            searchCard.addView(historyScroll)
-        }
-        container.addView(searchCard)
-
-        // 직접 내역 추가 버튼 및 폼
-        val toggleAddBtn = Button(this).apply {
-            text = if (isAddFormVisible) "▲ 직접 입력 창 닫기" else "➕ 직접 내역 추가하기"
-            textSize = 13f
-            setTypeface(null, Typeface.BOLD)
-            background = roundBg(bgCard, 10)
-            setTextColor(textPrimary)
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(10) }
-            setOnClickListener {
-                isAddFormVisible = !isAddFormVisible
-                refreshUI()
-            }
-        }
-        container.addView(toggleAddBtn)
-
-        if (isAddFormVisible) {
-            val inputCard = buildManualInputCard()
-            inputCard.background = roundBg(bgCard, 12)
-            styleInputsInGroup(inputCard, textPrimary, textSecondary)
-            container.addView(inputCard)
+            container.addView(searchBoxCard)
         }
 
-        // 내역 리스트
+        // 5) 내역 리스트
         container.addView(TextView(this).apply {
             text = "내역 ${filteredList.size}건 (눌러서 상세 보기 · 수정)"
             setTextColor(textSecondary)
-            textSize = 13f
+            textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(4), dp(12), dp(4), dp(6))
+            setPadding(dp(4), dp(10), dp(4), dp(6))
         })
 
         renderRecordCards(container, filteredList, bgCard, textSecondary, incColor, expColor, nf, compact = false)
@@ -724,7 +820,7 @@ class MainActivity : Activity() {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
         val barTrackColor = if (isDark) Color.parseColor("#374151") else Color.parseColor("#E5E7EB")
         val textPrimary = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
-        val textSecondary = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val textSecondary = if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#4B5563")
         val incColor = if (isDark) Color.parseColor("#60A5FA") else Color.parseColor("#2563EB")
         val expColor = if (isDark) Color.parseColor("#F87171") else Color.parseColor("#DC2626")
 
@@ -736,7 +832,6 @@ class MainActivity : Activity() {
             )
         }
 
-        // 기간 내 전체 데이터를 먼저 필터링해 카테고리별 건수 계산
         val allRecords = LedgerStorage.getRecords(this)
         val periodRecords = mutableListOf<JSONObject>()
         val catCountInPeriod = mutableMapOf<String, Int>()
@@ -756,7 +851,7 @@ class MainActivity : Activity() {
         // [왼쪽] 카테고리 세로 목록 사이드바
         val leftScroll = ScrollView(this).apply {
             setBackgroundColor(bgSidebar)
-            layoutParams = LinearLayout.LayoutParams(dp(88), ViewGroup.LayoutParams.MATCH_PARENT)
+            layoutParams = LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.MATCH_PARENT)
         }
         val leftList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -788,7 +883,7 @@ class MainActivity : Activity() {
 
             catItem.addView(TextView(this).apply {
                 text = cat
-                textSize = 12f
+                textSize = sp(12f)
                 gravity = Gravity.CENTER
                 setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
                 setTextColor(if (isSelected) Color.WHITE else textPrimary)
@@ -796,9 +891,9 @@ class MainActivity : Activity() {
 
             catItem.addView(TextView(this).apply {
                 text = "${cnt}건"
-                textSize = 10f
+                textSize = sp(10f)
                 gravity = Gravity.CENTER
-                setTextColor(if (isSelected) Color.parseColor("#D1FAE5") else textSecondary)
+                setTextColor(if (isSelected) Color.parseColor("#ECFDF5") else textSecondary)
                 setPadding(0, dp(2), 0, 0)
             })
 
@@ -816,7 +911,6 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(10), dp(12), dp(24))
         }
 
-        // 1) 기간 선택 카드
         rightContent.addView(
             buildPeriodFilterCard(isDark, compact = true).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -826,7 +920,6 @@ class MainActivity : Activity() {
             }
         )
 
-        // 선택된 카테고리 기준 데이터 집계
         val nf = NumberFormat.getNumberInstance(Locale.KOREA)
         var selInc = 0L
         var selExp = 0L
@@ -856,7 +949,6 @@ class MainActivity : Activity() {
             }
         }
 
-        // 2) 선택 카테고리 + 기간 요약 카드
         val shareText = if (selectedAnalysisCategory != "전체" && periodAllExp > 0L && selExp > 0L) {
             val sharePct = ((selExp.toDouble() / periodAllExp.toDouble()) * 100).toInt()
             " · 전체 지출의 $sharePct%"
@@ -877,7 +969,6 @@ class MainActivity : Activity() {
             )
         )
 
-        // 3) 분석 카드 ('전체'일 때는 카테고리별 비중 + TOP 결제처, 특정 카테고리일 때는 해당 카테고리 내 결제처 TOP 5)
         val chartCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = roundBg(bgCard, 12)
@@ -892,7 +983,7 @@ class MainActivity : Activity() {
             chartCard.addView(TextView(this).apply {
                 text = "📊 카테고리별 지출 비중"
                 setTextColor(textPrimary)
-                textSize = 14f
+                textSize = sp(14f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, 0, 0, dp(6))
             })
@@ -901,7 +992,7 @@ class MainActivity : Activity() {
                 chartCard.addView(TextView(this).apply {
                     text = "해당 기간에 지출 내역이 없습니다."
                     setTextColor(textSecondary)
-                    textSize = 12f
+                    textSize = sp(12f)
                 })
             } else {
                 for ((cat, amt) in subCatExpMap.entries.sortedByDescending { it.value }) {
@@ -915,14 +1006,14 @@ class MainActivity : Activity() {
                     row.addView(TextView(this).apply {
                         text = "$cat (${cnt}건 · $pct%)"
                         setTextColor(textPrimary)
-                        textSize = 12f
+                        textSize = sp(12f)
                         setTypeface(null, Typeface.BOLD)
                         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                     })
                     row.addView(TextView(this).apply {
                         text = "-${nf.format(amt)}원"
                         setTextColor(expColor)
-                        textSize = 12f
+                        textSize = sp(12f)
                         setTypeface(null, Typeface.BOLD)
                     })
                     chartCard.addView(row)
@@ -947,7 +1038,7 @@ class MainActivity : Activity() {
             chartCard.addView(TextView(this).apply {
                 text = "🏆 [$selectedAnalysisCategory] 최다 결제처 TOP 5"
                 setTextColor(textPrimary)
-                textSize = 14f
+                textSize = sp(14f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, 0, 0, dp(6))
             })
@@ -957,7 +1048,7 @@ class MainActivity : Activity() {
                 chartCard.addView(TextView(this).apply {
                     text = "해당 기간의 지출 내역이 없습니다."
                     setTextColor(textSecondary)
-                    textSize = 12f
+                    textSize = sp(12f)
                 })
             } else {
                 topMerchants.forEachIndexed { idx, (merchant, amt) ->
@@ -969,13 +1060,13 @@ class MainActivity : Activity() {
                     row.addView(TextView(this).apply {
                         text = "${idx + 1}. $merchant (${cnt}회)"
                         setTextColor(textPrimary)
-                        textSize = 12f
+                        textSize = sp(12f)
                         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                     })
                     row.addView(TextView(this).apply {
                         text = "-${nf.format(amt)}원"
                         setTextColor(expColor)
-                        textSize = 12f
+                        textSize = sp(12f)
                         setTypeface(null, Typeface.BOLD)
                     })
                     chartCard.addView(row)
@@ -984,11 +1075,10 @@ class MainActivity : Activity() {
         }
         rightContent.addView(chartCard)
 
-        // 4) 선택된 카테고리 + 기간의 거래 목록
         rightContent.addView(TextView(this).apply {
             text = "[$selectedAnalysisCategory] 내역 ${targetRecords.size}건"
             setTextColor(textSecondary)
-            textSize = 12f
+            textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
             setPadding(dp(2), dp(12), dp(2), dp(6))
         })
@@ -1001,12 +1091,13 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 3. [설정] 탭
+    // 3. [설정] 탭 (알림 권한 · 이메일 연동 · 다크 모드 · 글자 크기 조절 · 데이터 관리)
     // =========================================================================
     private fun renderSettingsTab(isDark: Boolean, container: LinearLayout) {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
+        val chipBg = if (isDark) Color.parseColor("#374151") else Color.parseColor("#F3F4F6")
         val textPrimary = if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#111827")
-        val textSecondary = if (isDark) Color.parseColor("#9CA3AF") else Color.parseColor("#6B7280")
+        val textSecondary = if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#4B5563")
 
         fun makeSettingCard(title: String, desc: String, btnText: String, btnColor: String, onClick: () -> Unit): LinearLayout {
             val card = LinearLayout(this).apply {
@@ -1021,18 +1112,18 @@ class MainActivity : Activity() {
             card.addView(TextView(this).apply {
                 text = title
                 setTextColor(textPrimary)
-                textSize = 15f
+                textSize = sp(15f)
                 setTypeface(null, Typeface.BOLD)
             })
             card.addView(TextView(this).apply {
                 text = desc
                 setTextColor(textSecondary)
-                textSize = 13f
+                textSize = sp(13f)
                 setPadding(0, dp(4), 0, dp(10))
             })
             card.addView(Button(this).apply {
                 text = btnText
-                textSize = 13f
+                textSize = sp(13f)
                 setTypeface(null, Typeface.BOLD)
                 setTextColor(Color.WHITE)
                 background = roundBg(Color.parseColor(btnColor), 8)
@@ -1041,6 +1132,7 @@ class MainActivity : Activity() {
             return card
         }
 
+        // 1. 알림 접근 권한
         val granted = isNotificationGranted()
         container.addView(
             makeSettingCard(
@@ -1053,6 +1145,7 @@ class MainActivity : Activity() {
             }
         )
 
+        // 2. 이메일 본문 직접 연동
         val savedEmail = LedgerStorage.getEmailAddress(this)
         val savedProv = if (LedgerStorage.getEmailProvider(this) == "naver") "네이버 메일" else "Gmail"
         container.addView(
@@ -1066,6 +1159,7 @@ class MainActivity : Activity() {
             }
         )
 
+        // 3. 화면 테마 (다크모드)
         container.addView(
             makeSettingCard(
                 title = "🌓 화면 테마 설정",
@@ -1074,10 +1168,67 @@ class MainActivity : Activity() {
                 btnColor = "#4B5563"
             ) {
                 LedgerStorage.setDarkMode(this, !isDark)
-                refreshUI()
+                recreate()
             }
         )
 
+        // 4. 글자 크기 조절 카드
+        val fontCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundBg(bgCard, 12)
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+        fontCard.addView(TextView(this).apply {
+            text = "🔠 글자 크기 조절"
+            setTextColor(textPrimary)
+            textSize = sp(15f)
+            setTypeface(null, Typeface.BOLD)
+        })
+        fontCard.addView(TextView(this).apply {
+            text = "미리보기: 가나다라 12,500원 (원하는 글자 크기를 선택하세요)"
+            setTextColor(textSecondary)
+            textSize = sp(13f)
+            setPadding(0, dp(4), 0, dp(10))
+        })
+
+        val scaleOptions = listOf(
+            "작게" to 0.85f,
+            "보통" to 1.0f,
+            "크게" to 1.15f,
+            "아주 크게" to 1.30f
+        )
+        val currentScale = LedgerStorage.getFontScale(this)
+        val scaleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        for ((label, scaleVal) in scaleOptions) {
+            val isSelected = kotlin.math.abs(currentScale - scaleVal) < 0.02f
+            scaleRow.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                gravity = Gravity.CENTER
+                setTypeface(null, if (isSelected) Typeface.BOLD else Typeface.NORMAL)
+                setTextColor(if (isSelected) Color.WHITE else textPrimary)
+                background = roundBg(if (isSelected) Color.parseColor("#10B981") else chipBg, 8)
+                setPadding(dp(4), dp(10), dp(4), dp(10))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    rightMargin = dp(4)
+                }
+                setOnClickListener {
+                    LedgerStorage.setFontScale(this@MainActivity, scaleVal)
+                    refreshUI()
+                }
+            })
+        }
+        fontCard.addView(scaleRow)
+        container.addView(fontCard)
+
+        // 5. 데이터 관리
         val count = LedgerStorage.getRecords(this).length()
         container.addView(
             makeSettingCard(
@@ -1086,7 +1237,7 @@ class MainActivity : Activity() {
                 btnText = "🗑️ 전체 거래 내역 초기화",
                 btnColor = "#EF4444"
             ) {
-                AlertDialog.Builder(this)
+                AlertDialog.Builder(this, getDialogTheme(isDark))
                     .setTitle("전체 내역 삭제")
                     .setMessage("저장된 ${count}건의 모든 가계부 내역을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.")
                     .setPositiveButton("모두 삭제") { _, _ ->
@@ -1101,7 +1252,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 공통 UI 빌더 메서드
+    // 공통 UI 빌더 및 팝업 다이얼로그 (다크 모드 텍스트 색상 완전 대응)
     // =========================================================================
     private fun buildSummaryCard(
         title: String,
@@ -1124,13 +1275,13 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = title
                 setTextColor(textSecondary)
-                textSize = if (compact) 11f else 13f
+                textSize = sp(if (compact) 11f else 13f)
                 gravity = Gravity.CENTER
             })
             addView(TextView(this@MainActivity).apply {
                 text = "${nf.format(totalInc - totalExp)}원"
                 setTextColor(textPrimary)
-                textSize = if (compact) 21f else 25f
+                textSize = sp(if (compact) 21f else 25f)
                 setTypeface(null, Typeface.BOLD)
                 gravity = Gravity.CENTER
                 setPadding(0, dp(4), 0, dp(6))
@@ -1143,14 +1294,14 @@ class MainActivity : Activity() {
             row.addView(TextView(this@MainActivity).apply {
                 text = "+${nf.format(totalInc)}원"
                 setTextColor(incColor)
-                textSize = if (compact) 13f else 15f
+                textSize = sp(if (compact) 13f else 15f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(dp(12), 0, dp(12), 0)
             })
             row.addView(TextView(this@MainActivity).apply {
                 text = "-${nf.format(totalExp)}원"
                 setTextColor(expColor)
-                textSize = if (compact) 13f else 15f
+                textSize = sp(if (compact) 13f else 15f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(dp(12), 0, dp(12), 0)
             })
@@ -1172,7 +1323,7 @@ class MainActivity : Activity() {
             targetContainer.addView(TextView(this).apply {
                 text = "해당 조건의 내역이 없습니다."
                 setTextColor(textSecondary)
-                textSize = 13f
+                textSize = sp(13f)
                 gravity = Gravity.CENTER
                 setPadding(0, dp(24), 0, dp(24))
             })
@@ -1218,14 +1369,14 @@ class MainActivity : Activity() {
             leftCol.addView(TextView(this).apply {
                 text = topMeta
                 setTextColor(Color.parseColor("#10B981"))
-                textSize = 10f
+                textSize = sp(10f)
                 setTypeface(null, Typeface.BOLD)
             })
 
             leftCol.addView(TextView(this).apply {
                 text = merchant
                 setTextColor(entryColor)
-                textSize = if (compact) 14f else 15f
+                textSize = sp(if (compact) 14f else 15f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(2), 0, dp(2))
             })
@@ -1238,14 +1389,14 @@ class MainActivity : Activity() {
             leftCol.addView(TextView(this).apply {
                 text = subInfo
                 setTextColor(textSecondary)
-                textSize = 11f
+                textSize = sp(11f)
             })
             itemCard.addView(leftCol)
 
             itemCard.addView(TextView(this).apply {
                 text = "$sign${nf.format(amount)}원"
                 setTextColor(entryColor)
-                textSize = if (compact) 13f else 15f
+                textSize = sp(if (compact) 13f else 15f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(dp(6), 0, 0, 0)
             })
@@ -1254,74 +1405,103 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun buildManualInputCard(): LinearLayout {
-        val card = LinearLayout(this).apply {
+    // 내역 직접 추가 팝업 다이얼로그 (메인 화면 공간 절약 + 다크 모드 가독성 최적화)
+    private fun showManualAddDialog() {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        var selectedTimestamp = System.currentTimeMillis()
+        var selectedDateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(selectedTimestamp))
+
+        val scroll = ScrollView(this)
+        val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(8) }
+            setPadding(dp(18), dp(14), dp(18), dp(10))
         }
 
-        val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val typeSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("-", "+")
-            )
+        val dateRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(8))
         }
-        val catSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                NotificationParser.CATEGORIES
-            )
+        val dateText = TextView(this).apply {
+            text = "날짜: $selectedDateStr"
+            textSize = sp(13f)
+            setTextColor(labelColor)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val dateBtn = Button(this).apply {
+            text = "📅 날짜선택"
+            textSize = sp(12f)
+            setTextColor(Color.WHITE)
+            background = roundBg(Color.parseColor("#4B5563"), 8)
+            setOnClickListener {
+                val cal = Calendar.getInstance().apply { timeInMillis = selectedTimestamp }
+                DatePickerDialog(
+                    this@MainActivity,
+                    getDialogTheme(isDark),
+                    { _, y, m, d ->
+                        cal.set(Calendar.YEAR, y)
+                        cal.set(Calendar.MONTH, m)
+                        cal.set(Calendar.DAY_OF_MONTH, d)
+                        selectedTimestamp = cal.timeInMillis
+                        selectedDateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(selectedTimestamp))
+                        dateText.text = "날짜: $selectedDateStr"
+                    },
+                    cal.get(Calendar.YEAR),
+                    cal.get(Calendar.MONTH),
+                    cal.get(Calendar.DAY_OF_MONTH)
+                ).show()
+            }
+        }
+        dateRow.addView(dateText)
+        dateRow.addView(dateBtn)
+        container.addView(dateRow)
+
+        val row1 = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(4), 0, dp(6))
+        }
+        val typeSpinner = makeThemedSpinner(isDark, listOf("- (지출)", "+ (수입)"), 0).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(6)
+            }
+        }
+        val catSpinner = makeThemedSpinner(isDark, NotificationParser.CATEGORIES, 0).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
         }
         row1.addView(typeSpinner)
         row1.addView(catSpinner)
-        card.addView(row1)
+        container.addView(row1)
 
-        val merchantInput = EditText(this).apply {
-            hint = "결제처 / 제목 (예: 쿠팡)"
-            textSize = 14f
+        fun makeInput(label: String, hintStr: String, isNumber: Boolean = false): EditText {
+            container.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, dp(3))
+            })
+            return EditText(this).apply {
+                hint = hintStr
+                textSize = sp(14f)
+                if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
+                styleDialogEditText(this, isDark)
+                container.addView(this)
+            }
         }
-        card.addView(merchantInput)
 
-        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val itemInput = EditText(this).apply {
-            hint = "품목 (예: 아메리카노)"
-            textSize = 14f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.5f)
-        }
-        val qtyInput = EditText(this).apply {
-            hint = "수량 (예: 2잔)"
-            textSize = 14f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        row2.addView(itemInput)
-        row2.addView(qtyInput)
-        card.addView(row2)
+        val merchantInput = makeInput("제목 / 결제처", "예: 쿠팡, 스타벅스")
+        val itemInput = makeInput("품목 (선택)", "예: 아메리카노")
+        val qtyInput = makeInput("수량 (선택)", "예: 2잔")
+        val amountInput = makeInput("금액 (원)", "숫자만 입력", isNumber = true)
 
-        val row3 = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(4) }
-        }
-        val amountInput = EditText(this).apply {
-            hint = "금액 (숫자만 입력)"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            textSize = 14f
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        val addBtn = Button(this).apply {
-            text = "저장"
-            setTextColor(Color.WHITE)
-            background = roundBg(Color.parseColor("#10B981"), 8)
-            setOnClickListener {
+        scroll.addView(container)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("➕ 내역 직접 추가")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
                 val merchant = merchantInput.text.toString().trim()
                 val amt = amountInput.text.toString().trim().toLongOrNull() ?: 0L
                 if (merchant.isNotEmpty() && amt > 0) {
@@ -1330,49 +1510,30 @@ class MainActivity : Activity() {
                     val item = itemInput.text.toString().trim()
                     val qty = qtyInput.text.toString().trim()
 
-                    LedgerStorage.addOrMergeRecord(
-                        context = this@MainActivity,
+                    LedgerStorage.addManualRecordWithDate(
+                        context = this,
                         type = type,
                         category = cat,
                         merchant = merchant,
                         item = item,
                         quantity = qty,
                         amount = amt,
-                        raw = "직접 입력 내역",
-                        imagePath = "",
-                        auto = false
+                        dateStr = selectedDateStr,
+                        timestamp = selectedTimestamp
                     )
-                    isAddFormVisible = false
                     refreshUI()
+                } else {
+                    Toast.makeText(this, "결제처와 금액을 입력해 주세요.", Toast.LENGTH_SHORT).show()
                 }
             }
-        }
-        row3.addView(amountInput)
-        row3.addView(addBtn)
-        card.addView(row3)
-
-        return card
+            .setNegativeButton("취소", null)
+            .show()
     }
 
-    private fun styleInputsInGroup(group: ViewGroup, textColor: Int, hintColor: Int) {
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i)
-            if (child is EditText) {
-                child.setTextColor(textColor)
-                child.setHintTextColor(hintColor)
-            } else if (child is ViewGroup) {
-                styleInputsInGroup(child, textColor, hintColor)
-            }
-        }
-    }
-
+    // 이메일 IMAP 직접 연동 설정 다이얼로그
     private fun showEmailConfigDialog() {
         val isDark = LedgerStorage.isDarkMode(this)
-        val themeId = if (isDark) {
-            android.R.style.Theme_DeviceDefault_Dialog_Alert
-        } else {
-            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-        }
+        val descColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
 
         val scroll = ScrollView(this)
         val box = LinearLayout(this).apply {
@@ -1382,18 +1543,21 @@ class MainActivity : Activity() {
 
         box.addView(TextView(this).apply {
             text = "이메일 알림이 울릴 때 결제 영수증 본문 전체를 직접 읽어옵니다.\n(구글·네이버 보안 설정에서 발급한 16자리 '앱 비밀번호'를 입력하세요)"
-            textSize = 12f
+            textSize = sp(12f)
+            setTextColor(descColor)
             setPadding(0, 0, 0, dp(10))
         })
 
-        val providerSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("Gmail (imap.gmail.com)", "네이버 메일 (imap.naver.com)")
-            )
-            val savedProv = LedgerStorage.getEmailProvider(this@MainActivity)
-            setSelection(if (savedProv == "naver") 1 else 0)
+        val savedProv = LedgerStorage.getEmailProvider(this)
+        val providerSpinner = makeThemedSpinner(
+            isDark,
+            listOf("Gmail (imap.gmail.com)", "네이버 메일 (imap.naver.com)"),
+            if (savedProv == "naver") 1 else 0
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
         }
         box.addView(providerSpinner)
 
@@ -1401,7 +1565,12 @@ class MainActivity : Activity() {
             hint = "이메일 주소 (예: example@gmail.com)"
             inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             setText(LedgerStorage.getEmailAddress(this@MainActivity))
-            textSize = 14f
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
         }
         box.addView(emailEdit)
 
@@ -1409,13 +1578,21 @@ class MainActivity : Activity() {
             hint = "앱 비밀번호 (16자리, 띄어쓰기 없이 입력)"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             setText(LedgerStorage.getEmailPassword(this@MainActivity))
-            textSize = 14f
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
         }
         box.addView(passEdit)
 
         val testBtn = Button(this).apply {
             text = "🔄 연결 테스트 및 최근 결제메일 1건 가져오기"
-            textSize = 12f
+            textSize = sp(12f)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = roundBg(Color.parseColor("#2563EB"), 8)
             setOnClickListener {
                 val prov = if (providerSpinner.selectedItemPosition == 1) "naver" else "gmail"
                 val addr = emailEdit.text.toString().trim()
@@ -1439,7 +1616,7 @@ class MainActivity : Activity() {
 
         scroll.addView(box)
 
-        AlertDialog.Builder(this, themeId)
+        AlertDialog.Builder(this, getDialogTheme(isDark))
             .setTitle("이메일 본문 직접 연동 설정")
             .setView(scroll)
             .setPositiveButton("저장") { _, _ ->
@@ -1457,13 +1634,10 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // 상세 보기 및 수정 다이얼로그
     private fun showEditDialog(recordObj: JSONObject) {
         val isDark = LedgerStorage.isDarkMode(this)
-        val themeId = if (isDark) {
-            android.R.style.Theme_DeviceDefault_Dialog_Alert
-        } else {
-            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-        }
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
 
         val recordId = recordObj.optString("id", "")
         val oldType = recordObj.optString("type", "exp")
@@ -1490,17 +1664,20 @@ class MainActivity : Activity() {
         }
         val dateText = TextView(this).apply {
             text = "기록 일시: $editedDateStr"
-            textSize = 12f
-            setTextColor(Color.GRAY)
+            textSize = sp(13f)
+            setTextColor(labelColor)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         val changeDateBtn = Button(this).apply {
             text = "📅 날짜변경"
-            textSize = 11f
+            textSize = sp(12f)
+            setTextColor(Color.WHITE)
+            background = roundBg(Color.parseColor("#4B5563"), 8)
             setOnClickListener {
                 val cal = Calendar.getInstance().apply { timeInMillis = editedTimestamp }
                 DatePickerDialog(
                     this@MainActivity,
+                    getDialogTheme(isDark),
                     { _, y, m, d ->
                         cal.set(Calendar.YEAR, y)
                         cal.set(Calendar.MONTH, m)
@@ -1539,7 +1716,14 @@ class MainActivity : Activity() {
 
         val attachBtn = Button(this).apply {
             text = "🖼️ 영수증 / 이미지 첨부하기"
-            textSize = 12f
+            textSize = sp(12f)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = roundBg(Color.parseColor("#10B981"), 8)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
             setOnClickListener {
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     type = "image/*"
@@ -1549,42 +1733,44 @@ class MainActivity : Activity() {
         }
         container.addView(attachBtn)
 
-        val typeSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("-", "+")
-            )
-            setSelection(if (oldType == "inc") 1 else 0)
+        val spinnerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(4))
         }
-        container.addView(typeSpinner)
-
-        val catSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_dropdown_item,
-                NotificationParser.CATEGORIES
-            )
-            val idx = NotificationParser.CATEGORIES.indexOf(oldCat)
-            if (idx >= 0) setSelection(idx)
+        val typeSpinner = makeThemedSpinner(
+            isDark,
+            listOf("- (지출)", "+ (수입)"),
+            if (oldType == "inc") 1 else 0
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(6)
+            }
         }
-        container.addView(catSpinner)
+        val catIdx = NotificationParser.CATEGORIES.indexOf(oldCat).coerceAtLeast(0)
+        val catSpinner = makeThemedSpinner(isDark, NotificationParser.CATEGORIES, catIdx).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
+        }
+        spinnerRow.addView(typeSpinner)
+        spinnerRow.addView(catSpinner)
+        container.addView(spinnerRow)
 
         fun makeLabeledInput(label: String, initial: String, isNumber: Boolean = false, multiLine: Boolean = false): EditText {
             container.addView(TextView(this).apply {
                 text = label
-                textSize = 12f
+                textSize = sp(12f)
+                setTextColor(labelColor)
                 setTypeface(null, Typeface.BOLD)
-                setPadding(0, dp(8), 0, dp(2))
+                setPadding(0, dp(8), 0, dp(3))
             })
             return EditText(this).apply {
                 setText(initial)
-                textSize = 14f
+                textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
                 if (multiLine) {
                     minLines = 3
                     isSingleLine = false
                 }
+                styleDialogEditText(this, isDark)
                 container.addView(this)
             }
         }
@@ -1597,7 +1783,7 @@ class MainActivity : Activity() {
 
         scroll.addView(container)
 
-        AlertDialog.Builder(this, themeId)
+        AlertDialog.Builder(this, getDialogTheme(isDark))
             .setTitle("내역 상세 및 수정")
             .setView(scroll)
             .setPositiveButton("저장") { _, _ ->
@@ -1660,6 +1846,8 @@ class MainActivity : Activity() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun sp(base: Float): Float = base * LedgerStorage.getFontScale(this)
 
     private fun roundBg(color: Int, radiusDp: Int): GradientDrawable {
         return GradientDrawable().apply {
@@ -2092,6 +2280,7 @@ object LedgerStorage {
     private const val PREF_NAME = "AutoLedgerPrefs"
     private const val KEY_RECORDS = "records"
     private const val KEY_DARK = "dark_mode"
+    private const val KEY_FONT_SCALE = "font_scale"
     private const val KEY_HISTORY = "search_history"
     private const val KEY_EMAIL_PROV = "email_provider"
     private const val KEY_EMAIL_ADDR = "email_address"
@@ -2105,6 +2294,16 @@ object LedgerStorage {
     fun setDarkMode(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_DARK, enabled).apply()
+    }
+
+    fun getFontScale(context: Context): Float {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getFloat(KEY_FONT_SCALE, 1.0f)
+    }
+
+    fun setFontScale(context: Context, scale: Float) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_FONT_SCALE, scale).apply()
     }
 
     fun saveEmailConfig(context: Context, provider: String, address: String, password: String) {
@@ -2173,6 +2372,41 @@ object LedgerStorage {
         } catch (_: Exception) {
             JSONArray()
         }
+    }
+
+    fun addManualRecordWithDate(
+        context: Context,
+        type: String,
+        category: String,
+        merchant: String,
+        item: String,
+        quantity: String,
+        amount: Long,
+        dateStr: String,
+        timestamp: Long
+    ) {
+        val oldArr = getRecords(context)
+        val newArr = JSONArray()
+
+        val record = JSONObject().apply {
+            put("id", System.currentTimeMillis().toString())
+            put("timestamp", timestamp)
+            put("type", type)
+            put("category", category)
+            put("merchant", merchant)
+            put("item", item)
+            put("quantity", quantity)
+            put("amount", amount)
+            put("date", dateStr)
+            put("raw", "직접 입력 내역")
+            put("imagePath", "")
+            put("auto", false)
+        }
+        newArr.put(record)
+        for (i in 0 until oldArr.length()) {
+            newArr.put(oldArr.getJSONObject(i))
+        }
+        save(context, newArr)
     }
 
     fun addOrMergeRecord(
