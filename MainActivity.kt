@@ -84,6 +84,11 @@ class MainActivity : Activity() {
     private var currentQuery = ""
     private var isSearchExpanded = false
 
+    private var lastAllScrollY = 0
+    private var lastAnalysisRightScrollY = 0
+    private var activeAllScrollView: ScrollView? = null
+    private var activeAnalysisRightScrollView: ScrollView? = null
+
     private val pieIncludedCategories = linkedSetOf(
         "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "기타"
     )
@@ -185,6 +190,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        captureScrollPositions()
         try {
             unregisterReceiver(updateReceiver)
         } catch (_: Exception) {
@@ -206,7 +212,16 @@ class MainActivity : Activity() {
         return enabled.contains(packageName)
     }
 
+    private fun captureScrollPositions() {
+        activeAllScrollView?.let { lastAllScrollY = it.scrollY }
+        activeAnalysisRightScrollView?.let { lastAnalysisRightScrollY = it.scrollY }
+    }
+
     private fun refreshUI() {
+        captureScrollPositions()
+        activeAllScrollView = null
+        activeAnalysisRightScrollView = null
+
         val isDark = LedgerStorage.isDarkMode(this)
 
         val bgPage = if (isDark) Color.parseColor("#0F0F0F") else Color.parseColor("#F4F4F6")
@@ -245,6 +260,7 @@ class MainActivity : Activity() {
         when (currentTab) {
             "all" -> {
                 val scroll = ScrollView(this)
+                activeAllScrollView = scroll
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(16), dp(4), dp(16), dp(24))
@@ -252,9 +268,19 @@ class MainActivity : Activity() {
                 renderAllTab(isDark, container)
                 scroll.addView(container)
                 contentHost.addView(scroll)
+
+                val restoreY = lastAllScrollY
+                if (restoreY > 0) {
+                    scroll.post { scroll.scrollTo(0, restoreY) }
+                }
             }
             "analysis" -> {
                 renderCombinedAnalysisTab(isDark)
+                val rightScroll = activeAnalysisRightScrollView
+                val restoreY = lastAnalysisRightScrollY
+                if (rightScroll != null && restoreY > 0) {
+                    rightScroll.post { rightScroll.scrollTo(0, restoreY) }
+                }
             }
             "settings" -> {
                 val scroll = ScrollView(this)
@@ -510,6 +536,8 @@ class MainActivity : Activity() {
         presetRow.addView(makePresetBtn("전체", isAllTime) {
             filterStartMillis = null
             filterEndMillis = null
+            lastAllScrollY = 0
+            lastAnalysisRightScrollY = 0
             refreshUI()
         })
 
@@ -520,6 +548,8 @@ class MainActivity : Activity() {
             val d = cal.get(Calendar.DAY_OF_MONTH)
             filterStartMillis = startOfDay(y, m, d)
             filterEndMillis = endOfDay(y, m, d)
+            lastAllScrollY = 0
+            lastAnalysisRightScrollY = 0
             refreshUI()
         })
 
@@ -530,6 +560,8 @@ class MainActivity : Activity() {
             val lastDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
             filterStartMillis = startOfDay(y, m, 1)
             filterEndMillis = endOfDay(y, m, lastDay)
+            lastAllScrollY = 0
+            lastAnalysisRightScrollY = 0
             refreshUI()
         })
 
@@ -538,6 +570,8 @@ class MainActivity : Activity() {
             val startCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -6) }
             filterStartMillis = startOfDay(startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH), startCal.get(Calendar.DAY_OF_MONTH))
             filterEndMillis = endOfDay(endCal.get(Calendar.YEAR), endCal.get(Calendar.MONTH), endCal.get(Calendar.DAY_OF_MONTH))
+            lastAllScrollY = 0
+            lastAnalysisRightScrollY = 0
             refreshUI()
         })
         card.addView(presetRow)
@@ -941,6 +975,7 @@ class MainActivity : Activity() {
                 ).apply { bottomMargin = dp(6) }
                 setOnClickListener {
                     selectedAnalysisCategory = cat
+                    lastAnalysisRightScrollY = 0
                     refreshUI()
                 }
             }
@@ -970,6 +1005,8 @@ class MainActivity : Activity() {
         val rightScroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         }
+        activeAnalysisRightScrollView = rightScroll
+
         val rightContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(6), dp(12), dp(24))
@@ -1491,6 +1528,8 @@ class MainActivity : Activity() {
                 .setMessage("저장된 ${count}건의 모든 가계부 내역을 삭제하시겠습니까?")
                 .setPositiveButton("모두 삭제") { _, _ ->
                     LedgerStorage.clearAllRecords(this)
+                    lastAllScrollY = 0
+                    lastAnalysisRightScrollY = 0
                     refreshUI()
                     Toast.makeText(this, "모든 내역이 초기화되었습니다.", Toast.LENGTH_SHORT).show()
                 }
@@ -2182,6 +2221,7 @@ class MainActivity : Activity() {
     }
 
     private fun showEditDialog(recordObj: JSONObject) {
+        captureScrollPositions()
         val isDark = LedgerStorage.isDarkMode(this)
         val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
 
