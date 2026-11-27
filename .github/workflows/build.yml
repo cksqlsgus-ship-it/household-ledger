@@ -172,4 +172,3 @@ jobs:
         with:
           name: auto-ledger-apk
           path: app/build/outputs/apk/debug/app-debug.apk
-concurrency:
