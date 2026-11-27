@@ -1,5 +1,6 @@
 package com.myledger.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Notification
@@ -7,6 +8,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -20,6 +22,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.text.InputType
@@ -29,19 +32,28 @@ import android.view.ViewGroup
 import android.widget.*
 import org.json.JSONArray
 import org.json.JSONObject
+import org.jsoup.Jsoup
 import java.io.File
 import java.io.FileOutputStream
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Properties
+import javax.mail.Folder
+import javax.mail.Message
+import javax.mail.Multipart
+import javax.mail.Session
 
 class MainActivity : Activity() {
 
     private lateinit var rootLayout: LinearLayout
     private lateinit var headerLayout: LinearLayout
+    private lateinit var emailBtn: Button
     private lateinit var themeBtn: Button
     private lateinit var statusBtn: Button
+    private lateinit var smsPermBtn: Button
+
     private lateinit var summaryCard: LinearLayout
     private lateinit var summaryLabel: TextView
     private lateinit var balanceText: TextView
@@ -62,7 +74,6 @@ class MainActivity : Activity() {
     private var currentQuery = ""
     private var isAddFormVisible = false
 
-    // 편집 다이얼로그에서 이미지 선택 결과를 받기 위한 변수
     private var pendingImagePath: String = ""
     private var dialogImageView: ImageView? = null
 
@@ -93,16 +104,29 @@ class MainActivity : Activity() {
         val titleView = TextView(this).apply {
             text = "💰 자동 가계부"
             setTextColor(Color.WHITE)
-            textSize = 20f
+            textSize = 19f
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         topBar.addView(titleView)
 
-        themeBtn = Button(this).apply {
-            textSize = 12f
+        emailBtn = Button(this).apply {
+            text = "📧 메일연동"
+            textSize = 11f
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), dp(4), dp(12), dp(4))
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { rightMargin = dp(6) }
+            setOnClickListener { showEmailConfigDialog() }
+        }
+        topBar.addView(emailBtn)
+
+        themeBtn = Button(this).apply {
+            textSize = 11f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(10), dp(4), dp(10), dp(4))
             setOnClickListener {
                 val nextDark = !LedgerStorage.isDarkMode(this@MainActivity)
                 LedgerStorage.setDarkMode(this@MainActivity, nextDark)
@@ -118,12 +142,29 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = dp(10) }
+            ).apply { topMargin = dp(8) }
             setOnClickListener {
                 startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             }
         }
         headerLayout.addView(statusBtn)
+
+        smsPermBtn = Button(this).apply {
+            text = "📩 문자함 원본 읽기 권한 허용하기 (눌러서 허용)"
+            textSize = 12f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#92400E"))
+            background = roundBg(Color.parseColor("#FEF3C7"), 8)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(6) }
+            setOnClickListener {
+                requestPermissions(arrayOf(Manifest.permission.READ_SMS), 2001)
+            }
+        }
+        headerLayout.addView(smsPermBtn)
+
         rootLayout.addView(headerLayout)
 
         // 2. 스크롤 본문
@@ -139,7 +180,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(14), dp(14), dp(28))
         }
 
-        // 3. 요약 카드
+        // 3. 요약 카드 (+ / - 기호만 표시)
         summaryCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(14), dp(16), dp(14))
@@ -166,16 +207,16 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         incText = TextView(this).apply {
-            text = "수입 +0원"
-            textSize = 14f
+            text = "+0원"
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), 0, dp(12), 0)
+            setPadding(dp(16), 0, dp(16), 0)
         }
         expText = TextView(this).apply {
-            text = "지출 -0원"
-            textSize = 14f
+            text = "-0원"
+            textSize = 15f
             setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), 0, dp(12), 0)
+            setPadding(dp(16), 0, dp(16), 0)
         }
         incExpRow.addView(incText)
         incExpRow.addView(expText)
@@ -317,7 +358,7 @@ class MainActivity : Activity() {
             adapter = ArrayAdapter(
                 this@MainActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("지출 (-)", "수입 (+)")
+                arrayOf("-", "+")
             )
         }
         val catSpinner = Spinner(this).apply {
@@ -332,7 +373,7 @@ class MainActivity : Activity() {
         card.addView(row1)
 
         val merchantInput = EditText(this).apply {
-            hint = "결제처 / 제목 (예: 스타벅스)"
+            hint = "결제처 / 제목 (예: 쿠팡)"
             textSize = 14f
         }
         card.addView(merchantInput)
@@ -378,7 +419,7 @@ class MainActivity : Activity() {
                     val item = itemInput.text.toString().trim()
                     val qty = qtyInput.text.toString().trim()
 
-                    LedgerStorage.addRecord(
+                    LedgerStorage.addOrMergeRecord(
                         context = this@MainActivity,
                         type = type,
                         category = cat,
@@ -424,15 +465,23 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        refreshUI()
+    }
+
     private fun isNotificationGranted(): Boolean {
         val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: ""
         return enabled.contains(packageName)
     }
 
+    private fun isSmsGranted(): Boolean {
+        return checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+    }
+
     private fun refreshUI() {
         val isDark = LedgerStorage.isDarkMode(this)
 
-        // 색상 팔레트 (라이트 / 다크)
         val bgPage = if (isDark) Color.parseColor("#111827") else Color.parseColor("#F3F4F6")
         val bgHeader = if (isDark) Color.parseColor("#065F46") else Color.parseColor("#10B981")
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
@@ -444,6 +493,11 @@ class MainActivity : Activity() {
 
         rootLayout.setBackgroundColor(bgPage)
         headerLayout.setBackgroundColor(bgHeader)
+
+        val savedEmail = LedgerStorage.getEmailAddress(this)
+        emailBtn.text = if (savedEmail.isNotEmpty()) "📧 메일연동됨" else "📧 메일연동"
+        emailBtn.setTextColor(if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#065F46"))
+        emailBtn.background = roundBg(if (isDark) Color.parseColor("#374151") else Color.parseColor("#D1FAE5"), 16)
 
         themeBtn.text = if (isDark) "☀️ 라이트" else "🌙 다크"
         themeBtn.setTextColor(if (isDark) Color.parseColor("#F9FAFB") else Color.parseColor("#065F46"))
@@ -458,6 +512,8 @@ class MainActivity : Activity() {
             statusBtn.setTextColor(if (isDark) Color.parseColor("#FECACA") else Color.parseColor("#991B1B"))
             statusBtn.background = roundBg(if (isDark) Color.parseColor("#7F1D1D") else Color.parseColor("#FEE2E2"), 8)
         }
+
+        smsPermBtn.visibility = if (isSmsGranted()) View.GONE else View.VISIBLE
 
         summaryCard.background = roundBg(bgCard, 12)
         summaryLabel.setTextColor(textSecondary)
@@ -476,13 +532,9 @@ class MainActivity : Activity() {
 
         listHeaderText.setTextColor(textSecondary)
 
-        // 검색 기록 칩 렌더링
-        renderSearchHistory(isDark, bgSubCard, textSecondary)
+        renderSearchHistory(bgSubCard, textSecondary)
+        renderCategoryChips(bgCard, textPrimary)
 
-        // 카테고리 필터 칩 렌더링
-        renderCategoryChips(isDark, bgCard, textPrimary)
-
-        // 데이터 필터링 및 렌더링
         val allRecords = LedgerStorage.getRecords(this)
         listContainer.removeAllViews()
 
@@ -494,7 +546,6 @@ class MainActivity : Activity() {
 
         for (i in 0 until allRecords.length()) {
             val obj = allRecords.getJSONObject(i)
-            val id = obj.optString("id", i.toString())
             val type = obj.optString("type", "exp")
             val category = obj.optString("category", "기타")
             val merchant = obj.optString("merchant", obj.optString("desc", ""))
@@ -506,10 +557,8 @@ class MainActivity : Activity() {
             val imagePath = obj.optString("imagePath", "")
             val isAuto = obj.optBoolean("auto", false)
 
-            // 카테고리 필터 확인
             if (selectedCategory != "전체" && category != selectedCategory) continue
 
-            // 검색어 필터 확인
             if (queryLower.isNotEmpty()) {
                 val searchable = "$merchant $item $category $raw $date".lowercase(Locale.KOREA)
                 if (!searchable.contains(queryLower)) continue
@@ -517,6 +566,9 @@ class MainActivity : Activity() {
 
             visibleCount++
             if (type == "inc") totalInc += amount else totalExp += amount
+
+            val sign = if (type == "inc") "+" else "-"
+            val entryColor = if (type == "inc") incColor else expColor
 
             val itemCard = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -549,9 +601,10 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
             })
 
+            // 제목(결제처)에 수입/지출 색상 적용
             leftCol.addView(TextView(this).apply {
                 text = merchant
-                setTextColor(textPrimary)
+                setTextColor(entryColor)
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(2), 0, dp(2))
@@ -569,11 +622,10 @@ class MainActivity : Activity() {
             })
             itemCard.addView(leftCol)
 
-            val sign = if (type == "inc") "+" else "-"
-            val amtColor = if (type == "inc") incColor else expColor
+            // 금액에 + / - 및 수입/지출 색상 적용
             itemCard.addView(TextView(this).apply {
                 text = "$sign${nf.format(amount)}원"
-                setTextColor(amtColor)
+                setTextColor(entryColor)
                 textSize = 15f
                 setTypeface(null, Typeface.BOLD)
                 setPadding(dp(8), 0, 0, 0)
@@ -588,9 +640,9 @@ class MainActivity : Activity() {
             "필터 합계 ($selectedCategory)"
         }
         balanceText.text = "${nf.format(totalInc - totalExp)}원"
-        incText.text = "수입 +${nf.format(totalInc)}원"
-        expText.text = "지출 -${nf.format(totalExp)}원"
-        listHeaderText.text = "내역 ${visibleCount}건 (항목을 눌러 상세 보기 및 수정)"
+        incText.text = "+${nf.format(totalInc)}원"
+        expText.text = "-${nf.format(totalExp)}원"
+        listHeaderText.text = "내역 ${visibleCount}건 (항목을 눌러 전체 내용 보기 및 수정)"
 
         if (visibleCount == 0) {
             listContainer.addView(TextView(this).apply {
@@ -615,7 +667,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun renderSearchHistory(isDark: Boolean, chipBg: Int, textColor: Int) {
+    private fun renderSearchHistory(chipBg: Int, textColor: Int) {
         historyRow.removeAllViews()
         val history = LedgerStorage.getSearchHistory(this)
         if (history.isEmpty()) return
@@ -660,7 +712,7 @@ class MainActivity : Activity() {
         historyRow.addView(clearHist)
     }
 
-    private fun renderCategoryChips(isDark: Boolean, cardBg: Int, textColor: Int) {
+    private fun renderCategoryChips(cardBg: Int, textColor: Int) {
         categoryRow.removeAllViews()
         val allCats = listOf("전체") + NotificationParser.CATEGORIES
 
@@ -686,7 +738,99 @@ class MainActivity : Activity() {
         }
     }
 
-    // 상세 보기 및 수정 다이얼로그
+    // 이메일 IMAP 직접 연동 설정 다이얼로그
+    private fun showEmailConfigDialog() {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val themeId = if (isDark) {
+            android.R.style.Theme_DeviceDefault_Dialog_Alert
+        } else {
+            android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        }
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        box.addView(TextView(this).apply {
+            text = "이메일 알림이 울릴 때 결제 영수증 본문 전체를 직접 읽어옵니다.\n(구글·네이버 보안 설정에서 발급한 16자리 '앱 비밀번호'를 입력하세요)"
+            textSize = 12f
+            setPadding(0, 0, 0, dp(10))
+        })
+
+        val providerSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                arrayOf("Gmail (imap.gmail.com)", "네이버 메일 (imap.naver.com)")
+            )
+            val savedProv = LedgerStorage.getEmailProvider(this@MainActivity)
+            setSelection(if (savedProv == "naver") 1 else 0)
+        }
+        box.addView(providerSpinner)
+
+        val emailEdit = EditText(this).apply {
+            hint = "이메일 주소 (예: example@gmail.com)"
+            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setText(LedgerStorage.getEmailAddress(this@MainActivity))
+            textSize = 14f
+        }
+        box.addView(emailEdit)
+
+        val passEdit = EditText(this).apply {
+            hint = "앱 비밀번호 (16자리, 띄어쓰기 없이 입력)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(LedgerStorage.getEmailPassword(this@MainActivity))
+            textSize = 14f
+        }
+        box.addView(passEdit)
+
+        val testBtn = Button(this).apply {
+            text = "🔄 연결 테스트 및 최근 결제메일 1건 가져오기"
+            textSize = 12f
+            setOnClickListener {
+                val prov = if (providerSpinner.selectedItemPosition == 1) "naver" else "gmail"
+                val addr = emailEdit.text.toString().trim()
+                val pw = passEdit.text.toString().replace(" ", "").trim()
+                if (addr.isEmpty() || pw.isEmpty()) {
+                    Toast.makeText(this@MainActivity, "이메일과 앱 비밀번호를 먼저 입력하세요.", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                LedgerStorage.saveEmailConfig(this@MainActivity, prov, addr, pw)
+                Toast.makeText(this@MainActivity, "메일 서버에 접속 중...", Toast.LENGTH_SHORT).show()
+                Thread {
+                    val resultMsg = EmailImapFetcher.fetchLatestPaymentEmail(this@MainActivity, lookbackMs = 86_400_000L)
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, resultMsg, Toast.LENGTH_LONG).show()
+                        refreshUI()
+                    }
+                }.start()
+            }
+        }
+        box.addView(testBtn)
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, themeId)
+            .setTitle("이메일 본문 직접 연동 설정")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val prov = if (providerSpinner.selectedItemPosition == 1) "naver" else "gmail"
+                val addr = emailEdit.text.toString().trim()
+                val pw = passEdit.text.toString().replace(" ", "").trim()
+                LedgerStorage.saveEmailConfig(this, prov, addr, pw)
+                refreshUI()
+            }
+            .setNeutralButton("연동 해제") { _, _ ->
+                LedgerStorage.saveEmailConfig(this, "gmail", "", "")
+                refreshUI()
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    // 상세 보기 및 수정 다이얼로그 (줄 수 제한 완전 해제)
     private fun showEditDialog(recordObj: JSONObject) {
         val isDark = LedgerStorage.isDarkMode(this)
         val themeId = if (isDark) {
@@ -719,7 +863,6 @@ class MainActivity : Activity() {
             setPadding(0, 0, 0, dp(8))
         })
 
-        // 이미지 미리보기 및 첨부 버튼
         val imgView = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -750,12 +893,12 @@ class MainActivity : Activity() {
         }
         container.addView(attachBtn)
 
-        // 구분 및 카테고리 선택
+        // + / - 선택 스피너
         val typeSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@MainActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("지출 (-)", "수입 (+)")
+                arrayOf("-", "+")
             )
             setSelection(if (oldType == "inc") 1 else 0)
         }
@@ -784,8 +927,8 @@ class MainActivity : Activity() {
                 textSize = 14f
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
                 if (multiLine) {
-                    minLines = 2
-                    maxLines = 5
+                    minLines = 3
+                    isSingleLine = false
                 }
                 container.addView(this)
             }
@@ -795,7 +938,7 @@ class MainActivity : Activity() {
         val itemEdit = makeLabeledInput("품목", oldItem)
         val qtyEdit = makeLabeledInput("수량", oldQty)
         val amtEdit = makeLabeledInput("금액 (원)", oldAmt.toString(), isNumber = true)
-        val rawEdit = makeLabeledInput("상세 내용 / 원본 알림", oldRaw, multiLine = true)
+        val rawEdit = makeLabeledInput("상세 내용 / 원본 전문 (전체 표시)", oldRaw, multiLine = true)
 
         scroll.addView(container)
 
@@ -881,37 +1024,129 @@ class PaymentNotificationListener : NotificationListenerService() {
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
 
-        val body = if (bigText.length > text.length) bigText else text
-        val fullText = "$title $body".trim()
+        // 여러 줄 텍스트 및 카카오톡 묶음 메시지(EXTRA_MESSAGES)까지 모두 추출
+        val linesBuilder = StringBuilder()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        textLines?.forEach { line ->
+            if (!line.isNullOrBlank()) linesBuilder.append("\n").append(line.toString().trim())
+        }
+
+        val bundleMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        bundleMessages?.forEach { parcel ->
+            if (parcel is Bundle) {
+                val mSender = parcel.getCharSequence("sender")?.toString()?.trim() ?: ""
+                val mText = parcel.getCharSequence("text")?.toString()?.trim() ?: ""
+                if (mText.isNotEmpty()) {
+                    linesBuilder.append("\n")
+                    if (mSender.isNotEmpty()) linesBuilder.append("$mSender: ")
+                    linesBuilder.append(mText)
+                }
+            }
+        }
+
+        val mainBody = if (bigText.length > text.length) bigText else text
+        val combinedBody = buildString {
+            append(mainBody)
+            if (subText.isNotEmpty() && !mainBody.contains(subText)) append("\n$subText")
+            val extraLinesStr = linesBuilder.toString().trim()
+            if (extraLinesStr.isNotEmpty() && !mainBody.contains(extraLinesStr)) {
+                append("\n$extraLinesStr")
+            }
+        }.trim()
+
+        var fullText = "$title\n$combinedBody".trim()
         if (fullText.isEmpty()) return
 
-        val parsed = NotificationParser.parse(title, body, fullText) ?: return
+        val pkgLower = pkg.lowercase(Locale.ROOT)
+        val isSmsApp = pkgLower.contains("messaging") || pkgLower.contains("sms") || pkgLower.contains("mms")
+        val isEmailApp = pkgLower.contains("gm") || pkgLower.contains("mail") || pkgLower.contains("outlook")
 
-        // 5초 이내 동일 알림 중복 방지
-        val sig = "$pkg|${parsed.merchant}|${parsed.amount}"
-        val now = System.currentTimeMillis()
-        if (sig == lastSignature && now - lastTime < 5000L) return
-        lastSignature = sig
-        lastTime = now
+        // 1. 문자 앱 알림인 경우: 문자함에서 잘리지 않은 원본 문자(LMS 포함) 직접 읽기
+        if (isSmsApp) {
+            val smsFullBody = readLatestInboxSms(title, combinedBody)
+            if (smsFullBody.isNotEmpty()) {
+                fullText = "$title\n$smsFullBody"
+            }
+        }
 
-        // 알림에 포함된 이미지 추출 및 저장
-        val bmp = extractBitmap(extras)
-        val imagePath = if (bmp != null) LedgerStorage.saveBitmapToFile(this, bmp) else ""
+        val parsed = NotificationParser.parse(title, fullText, fullText)
+        if (parsed != null) {
+            val sig = "$pkg|${parsed.merchant}|${parsed.amount}"
+            val now = System.currentTimeMillis()
+            if (sig != lastSignature || now - lastTime >= 5000L) {
+                lastSignature = sig
+                lastTime = now
 
-        LedgerStorage.addRecord(
-            context = this,
-            type = parsed.type,
-            category = parsed.category,
-            merchant = parsed.merchant,
-            item = parsed.item,
-            quantity = parsed.quantity,
-            amount = parsed.amount,
-            raw = fullText,
-            imagePath = imagePath,
-            auto = true
-        )
-        sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").setPackage(packageName))
+                val bmp = extractBitmap(extras)
+                val imagePath = if (bmp != null) LedgerStorage.saveBitmapToFile(this, bmp) else ""
+
+                LedgerStorage.addOrMergeRecord(
+                    context = this,
+                    type = parsed.type,
+                    category = parsed.category,
+                    merchant = parsed.merchant,
+                    item = parsed.item,
+                    quantity = parsed.quantity,
+                    amount = parsed.amount,
+                    raw = fullText,
+                    imagePath = imagePath,
+                    auto = true
+                )
+                sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").setPackage(packageName))
+            }
+        }
+
+        // 2. 이메일 앱 알림인 경우: 연동된 IMAP 메일함에서 잘린 뒷내용까지 전체 본문 직접 가져오기
+        if (isEmailApp && LedgerStorage.getEmailAddress(this).isNotEmpty()) {
+            Thread {
+                try {
+                    Thread.sleep(2000L)
+                    EmailImapFetcher.fetchLatestPaymentEmail(this, lookbackMs = 180_000L)
+                    sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").setPackage(packageName))
+                } catch (_: Exception) {
+                }
+            }.start()
+        }
+    }
+
+    private fun readLatestInboxSms(senderTitle: String, snippet: String): String {
+        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return ""
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val cursor = contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                "${Telephony.Sms.DATE} > ?",
+                arrayOf((now - 30_000L).toString()),
+                "${Telephony.Sms.DATE} DESC"
+            )
+            cursor?.use { c ->
+                val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
+                val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                var bestMatch = ""
+                while (c.moveToNext()) {
+                    val body = if (bodyIdx >= 0) c.getString(bodyIdx) ?: "" else ""
+                    val addr = if (addrIdx >= 0) c.getString(addrIdx) ?: "" else ""
+                    if (body.isEmpty()) continue
+                    if (snippet.length >= 6 && body.contains(snippet.take(10))) {
+                        return body
+                    }
+                    if (senderTitle.isNotEmpty() && addr.contains(senderTitle.replace("-", ""))) {
+                        bestMatch = body
+                    }
+                    if (bestMatch.isEmpty() && NotificationParser.containsPaymentKeyword(body)) {
+                        bestMatch = body
+                    }
+                }
+                bestMatch
+            } ?: ""
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     private fun extractBitmap(extras: Bundle): Bitmap? {
@@ -945,10 +1180,152 @@ class PaymentNotificationListener : NotificationListenerService() {
     }
 }
 
+object EmailImapFetcher {
+
+    fun fetchLatestPaymentEmail(context: Context, lookbackMs: Long): String {
+        val provider = LedgerStorage.getEmailProvider(context)
+        val email = LedgerStorage.getEmailAddress(context)
+        val password = LedgerStorage.getEmailPassword(context)
+        if (email.isEmpty() || password.isEmpty()) {
+            return "이메일 설정이 비어 있습니다."
+        }
+
+        val host = if (provider == "naver") "imap.naver.com" else "imap.gmail.com"
+        return try {
+            val props = Properties().apply {
+                put("mail.store.protocol", "imaps")
+                put("mail.imaps.host", host)
+                put("mail.imaps.port", "993")
+                put("mail.imaps.ssl.enable", "true")
+                put("mail.imaps.connectiontimeout", "10000")
+                put("mail.imaps.timeout", "10000")
+            }
+
+            val session = Session.getInstance(props)
+            val store = session.getStore("imaps")
+            store.connect(host, email, password)
+
+            val inbox = store.getFolder("INBOX")
+            inbox.open(Folder.READ_ONLY)
+
+            val total = inbox.messageCount
+            if (total == 0) {
+                inbox.close(false)
+                store.close()
+                return "받은편지함이 비어 있습니다."
+            }
+
+            val startIdx = maxOf(1, total - 5)
+            val messages = inbox.getMessages(startIdx, total)
+            val now = System.currentTimeMillis()
+            var importedCount = 0
+
+            for (i in messages.indices.reversed()) {
+                val msg = messages[i]
+                val receivedTime = msg.receivedDate?.time ?: msg.sentDate?.time ?: now
+                if (now - receivedTime > lookbackMs) continue
+
+                val subject = msg.subject ?: ""
+                val bodyText = extractMessageText(msg)
+                val fullText = "$subject\n$bodyText".trim()
+
+                val parsed = NotificationParser.parse(subject, fullText, fullText)
+                if (parsed != null) {
+                    LedgerStorage.addOrMergeRecord(
+                        context = context,
+                        type = parsed.type,
+                        category = parsed.category,
+                        merchant = parsed.merchant,
+                        item = parsed.item,
+                        quantity = parsed.quantity,
+                        amount = parsed.amount,
+                        raw = fullText,
+                        imagePath = "",
+                        auto = true
+                    )
+                    importedCount++
+                    break
+                }
+            }
+
+            inbox.close(false)
+            store.close()
+
+            if (importedCount > 0) {
+                "연동 성공! 결제 메일 본문 전체를 가져왔습니다."
+            } else {
+                "연동 성공! (최근 범위 내 새 결제 메일은 없습니다)"
+            }
+        } catch (e: Exception) {
+            "연동 실패: ${e.message ?: "이메일/앱 비밀번호를 확인하세요"}"
+        }
+    }
+
+    private fun extractMessageText(message: Message): String {
+        return try {
+            val content = message.content
+            when (content) {
+                is String -> htmlToStructuredText(content)
+                is Multipart -> extractFromMultipart(content)
+                else -> ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun extractFromMultipart(multipart: Multipart): String {
+        var plainText = ""
+        var htmlText = ""
+        for (i in 0 until multipart.count) {
+            val part = multipart.getBodyPart(i)
+            val content = part.content
+            if (part.isMimeType("text/plain") && content is String) {
+                plainText += "\n" + content
+            } else if (part.isMimeType("text/html") && content is String) {
+                htmlText += "\n" + htmlToStructuredText(content)
+            } else if (content is Multipart) {
+                val nested = extractFromMultipart(content)
+                if (nested.isNotEmpty()) htmlText += "\n" + nested
+            }
+        }
+        // HTML 테이블 구조가 있는 영수증 메일은 구조화된 HTML 변환 결과를 우선 사용
+        return if (htmlText.trim().length >= plainText.trim().length) {
+            htmlText.trim()
+        } else {
+            plainText.trim()
+        }
+    }
+
+    private fun htmlToStructuredText(rawHtml: String): String {
+        if (!rawHtml.contains("<")) return rawHtml.trim()
+        val withMarkers = rawHtml
+            .replace(Regex("""(?i)</(tr|p|div|li|h[1-6])>|<br\s*/?>"""), "___NL___")
+            .replace(Regex("""(?i)</(td|th)>"""), " : ")
+        val plain = Jsoup.parse(withMarkers).text()
+        return plain.split("___NL___")
+            .map { line ->
+                line.replace(Regex("""\s+"""), " ")
+                    .replace(Regex("""^[:\s]+|[:\s]+$"""), "")
+                    .trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+    }
+}
+
 object NotificationParser {
 
     val CATEGORIES = listOf(
         "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "수입", "기타"
+    )
+
+    private val KEYWORDS = listOf("승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드", "영수증", "KRW", "주문")
+
+    private val PG_OR_GENERIC_NAMES = listOf(
+        "메시지", "문자", "신한카드", "삼성카드", "현대카드", "KB국민카드", "롯데카드",
+        "우리카드", "하나카드", "NH농협카드", "카카오페이", "네이버페이", "토스", "Gmail",
+        "NHN KCP", "KCP", "KG이니시스", "이니시스", "토스페이먼츠", "나이스페이", "다날", "발신전용"
     )
 
     data class ParsedPayment(
@@ -960,9 +1337,12 @@ object NotificationParser {
         val amount: Long
     )
 
+    fun containsPaymentKeyword(text: String): Boolean {
+        return KEYWORDS.any { text.contains(it) }
+    }
+
     fun parse(title: String, body: String, fullText: String): ParsedPayment? {
-        val keywords = listOf("승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드", "영수증", "KRW", "주문")
-        if (keywords.none { fullText.contains(it) }) return null
+        if (!containsPaymentKeyword(fullText)) return null
 
         val amtRegex = Regex("""([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원|KRW\s*([0-9,]+)""")
         val amtMatch = amtRegex.find(fullText) ?: return null
@@ -973,29 +1353,55 @@ object NotificationParser {
         val isIncome = fullText.contains("입금") || fullText.contains("취소") || fullText.contains("환불")
         val type = if (isIncome) "inc" else "exp"
 
-        // 수량 추출 (예: 2개, 1잔, 3건, 8병 등)
-        val qtyRegex = Regex("""([0-9]+\s*(?:개|잔|건|박스|병|팩|매|세트|봉|통|권))""")
-        val quantity = qtyRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
+        // 1. 명시적 라벨에서 결제처(가맹점) 우선 추출 (예: 구매상점명 : 쿠팡(쿠페이))
+        val labeledMerchantRegex = Regex("""(?:구매상점명|가맹점명|상점명|사용처|결제처|판매자)\s*[:：]\s*([^\n\r]+)""")
+        val labeledMerchant = labeledMerchantRegex.find(fullText)?.groupValues?.get(1)?.trim() ?: ""
 
-        // 품목 추출 (수량 앞 단어나 상품명 패턴)
-        var item = ""
-        if (quantity.isNotEmpty()) {
-            val itemRegex = Regex("""([가-힣a-zA-Z0-9\s\-]{2,20})\s*${Regex.escape(quantity)}""")
-            item = itemRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
+        // 2. 명시적 라벨에서 품목 우선 추출 (예: 주문상품명 : 하겐다즈...)
+        val labeledItemRegex = Regex("""(?:주문상품명|상품명|품목명|품목)\s*[:：]\s*([^\n\r]+)""")
+        var item = labeledItemRegex.find(fullText)?.groupValues?.get(1)?.trim() ?: ""
+
+        // 3. 수량 추출 ('80ml' 제외, '3개입' 등 묶음표기 제외, '총 2건' 또는 독립 수량 우선)
+        val totalCountRegex = Regex("""(총\s*[0-9]+\s*(?:건|개|종))""")
+        val standaloneQtyRegex = Regex("""([0-9]+\s*(?:개|잔|건|박스|병|팩|매|세트|봉|통|권))(?!입)""")
+        val searchTargetForQty = if (item.isNotEmpty()) item else body
+        val quantity = totalCountRegex.find(searchTargetForQty)?.groupValues?.get(1)?.trim()
+            ?: standaloneQtyRegex.find(searchTargetForQty)?.groupValues?.get(1)?.trim()
+            ?: ""
+
+        // 품목 라벨이 없었을 때만 보조 추출
+        if (item.isEmpty() && quantity.isNotEmpty()) {
+            val fallbackItemRegex = Regex("""([가-힣a-zA-Z0-9\s\-]{2,25})\s*${Regex.escape(quantity)}""")
+            val candidateItem = fallbackItemRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
+            if (!candidateItem.matches(Regex("""^[0-9]+(?:ml|g|kg|L)$""", RegexOption.IGNORE_CASE))) {
+                item = candidateItem
+            }
         }
 
-        // 결제처(제목) 정리
+        // 결제처(제목) 최종 결정 (PG사 이름 배제)
         val cleanTitle = title.replace(Regex("""\[.*?]"""), "").trim()
-        val cleanBody = body.replace(Regex("""\[.*?]"""), "").trim()
-        val genericSenders = listOf("메시지", "문자", "신한카드", "삼성카드", "현대카드", "KB국민카드", "롯데카드", "우리카드", "하나카드", "NH농협카드", "카카오페이", "네이버페이", "토스", "Gmail")
+        val isGenericTitle = cleanTitle.isEmpty() || PG_OR_GENERIC_NAMES.any {
+            cleanTitle.contains(it, ignoreCase = true)
+        }
 
-        val merchant = if (cleanTitle.isNotEmpty() && genericSenders.none { cleanTitle.equals(it, ignoreCase = true) }) {
-            cleanTitle
-        } else {
-            // 본문에서 줄바꿈 기준 마지막 유효 줄 또는 금액 뒤의 가맹점 추출
-            val lines = cleanBody.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-            val candidate = lines.lastOrNull { !it.contains("잔액") && !it.contains("누적") } ?: cleanBody
-            candidate.take(22)
+        val merchant = when {
+            labeledMerchant.isNotEmpty() -> labeledMerchant
+            !isGenericTitle -> cleanTitle
+            else -> {
+                val lines = body.replace(Regex("""\[.*?]"""), "")
+                    .split("\n")
+                    .map { it.trim() }
+                    .filter { line ->
+                        line.isNotEmpty() &&
+                            !line.contains("잔액") &&
+                            !line.contains("누적") &&
+                            !line.contains("안전하게 결제") &&
+                            PG_OR_GENERIC_NAMES.none { pg -> line.equals(pg, ignoreCase = true) }
+                    }
+                (lines.firstOrNull { it.contains("페이") || it.contains("마트") || it.contains("스토어") || it.contains("점") }
+                    ?: lines.lastOrNull()
+                    ?: "결제 내역").take(26)
+            }
         }
 
         val category = if (isIncome) {
@@ -1016,7 +1422,7 @@ object NotificationParser {
 
     private fun classifyCategory(text: String): String {
         val rules = listOf(
-            "카페/간식" to listOf("스타벅스", "투썸", "메가커피", "컴포즈", "빽다방", "이디야", "할리스", "폴바셋", "카페", "커피", "베이커리", "파리바게뜨", "뚜레쥬르", "베스킨", "디저트"),
+            "카페/간식" to listOf("스타벅스", "투썸", "메가커피", "컴포즈", "빽다방", "이디야", "할리스", "폴바셋", "카페", "커피", "베이커리", "파리바게뜨", "뚜레쥬르", "베스킨", "하겐다즈", "아이스크림", "디저트"),
             "식비" to listOf("배달의민족", "배민", "쿠팡이츠", "요기요", "맥도날드", "버거킹", "롯데리아", "식당", "김밥", "국밥", "치킨", "피자", "족발", "보쌈", "횟집", "고기", "한식", "중식", "일식", "분식", "편의점", "GS25", "CU", "세븐일레븐"),
             "교통/차량" to listOf("택시", "카카오T", "티머니", "버스", "지하철", "코레일", "SRT", "KTX", "대한항공", "아시아나", "주유", "GS칼텍스", "SK에너지", "S-OIL", "하이패스", "주차"),
             "쇼핑/생활" to listOf("쿠팡", "네이버쇼핑", "11번가", "G마켓", "옥션", "SSG", "이마트", "홈플러스", "롯데마트", "다이소", "올리브영", "무신사", "마트", "마켓컬리"),
@@ -1038,6 +1444,9 @@ object LedgerStorage {
     private const val KEY_RECORDS = "records"
     private const val KEY_DARK = "dark_mode"
     private const val KEY_HISTORY = "search_history"
+    private const val KEY_EMAIL_PROV = "email_provider"
+    private const val KEY_EMAIL_ADDR = "email_address"
+    private const val KEY_EMAIL_PASS = "email_password"
 
     fun isDarkMode(context: Context): Boolean {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -1048,6 +1457,23 @@ object LedgerStorage {
         context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_DARK, enabled).apply()
     }
+
+    fun saveEmailConfig(context: Context, provider: String, address: String, password: String) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EMAIL_PROV, provider)
+            .putString(KEY_EMAIL_ADDR, address)
+            .putString(KEY_EMAIL_PASS, password)
+            .apply()
+    }
+
+    fun getEmailProvider(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_PROV, "gmail") ?: "gmail"
+
+    fun getEmailAddress(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_ADDR, "") ?: ""
+
+    fun getEmailPassword(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_PASS, "") ?: ""
 
     fun getSearchHistory(context: Context): List<String> {
         val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -1100,7 +1526,8 @@ object LedgerStorage {
         }
     }
 
-    fun addRecord(
+    // 동일 결제(3분 이내·동일 금액)가 문자와 이메일로 중복 도착할 경우 더 상세한 내용으로 통합
+    fun addOrMergeRecord(
         context: Context,
         type: String,
         category: String,
@@ -1113,11 +1540,38 @@ object LedgerStorage {
         auto: Boolean
     ) {
         val oldArr = getRecords(context)
+        val now = System.currentTimeMillis()
+
+        if (auto) {
+            for (i in 0 until oldArr.length()) {
+                val existing = oldArr.getJSONObject(i)
+                val exTime = existing.optLong("timestamp", 0L)
+                val exAmt = existing.optLong("amount", 0L)
+                val exType = existing.optString("type", "exp")
+                if (exAmt == amount && exType == type && (now - exTime) in 0..180_000L) {
+                    val exRaw = existing.optString("raw", "")
+                    if (raw.length > exRaw.length) {
+                        existing.put("raw", raw)
+                        if (item.isNotEmpty()) existing.put("item", item)
+                        if (quantity.isNotEmpty()) existing.put("quantity", quantity)
+                        if (merchant != "결제 내역") existing.put("merchant", merchant)
+                        if (category != "기타") existing.put("category", category)
+                    }
+                    if (imagePath.isNotEmpty() && existing.optString("imagePath").isEmpty()) {
+                        existing.put("imagePath", imagePath)
+                    }
+                    save(context, oldArr)
+                    return
+                }
+            }
+        }
+
         val newArr = JSONArray()
-        val dateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date())
+        val dateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(now))
 
         val record = JSONObject().apply {
-            put("id", System.currentTimeMillis().toString())
+            put("id", now.toString())
+            put("timestamp", now)
             put("type", type)
             put("category", category)
             put("merchant", merchant)
