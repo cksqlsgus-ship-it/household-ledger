@@ -63,7 +63,6 @@ class MainActivity : Activity() {
     private var currentQuery = ""
     private var isSearchExpanded = false
 
-    // 임의 기간 필터 (null이면 전체 기간)
     private var filterStartMillis: Long? = null
     private var filterEndMillis: Long? = null
 
@@ -88,7 +87,6 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
         }
 
-        // 1. 상단 헤더
         headerLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -120,7 +118,6 @@ class MainActivity : Activity() {
         headerLayout.addView(headerBadgeText)
         rootLayout.addView(headerLayout)
 
-        // 2. 중앙 콘텐츠 호스트
         contentHost = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -130,7 +127,6 @@ class MainActivity : Activity() {
         }
         rootLayout.addView(contentHost)
 
-        // 3. 하단 내비게이션 구분선 및 3탭 바 (전체 · 분석 · 설정)
         navDivider = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
         }
@@ -244,7 +240,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // 하단 3탭 내비게이션 바 (전체 · 분석 · 설정)
     private fun renderBottomNavBar(isDark: Boolean) {
         bottomNavBar.removeAllViews()
 
@@ -297,9 +292,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // =========================================================================
-    // 다크 모드 최적화 어댑터 / 다이얼로그 유틸리티
-    // =========================================================================
     private fun getDialogTheme(isDark: Boolean): Int {
         return if (isDark) {
             android.R.style.Theme_Material_Dialog_Alert
@@ -351,9 +343,6 @@ class MainActivity : Activity() {
         edit.setPadding(dp(12), dp(10), dp(12), dp(10))
     }
 
-    // =========================================================================
-    // 기간 필터 유틸리티 및 공통 카드 UI
-    // =========================================================================
     private fun getRecordTimestamp(obj: JSONObject): Long {
         val ts = obj.optLong("timestamp", 0L)
         if (ts > 0L) return ts
@@ -567,7 +556,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 1. [전체] 탭 (슬림 상단 + 접이식 검색 + 팝업 직접 추가 + 전체 목록)
+    // 1. [전체] 탭
     // =========================================================================
     private fun renderAllTab(isDark: Boolean, container: LinearLayout) {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
@@ -577,7 +566,6 @@ class MainActivity : Activity() {
         val incColor = if (isDark) Color.parseColor("#60A5FA") else Color.parseColor("#2563EB")
         val expColor = if (isDark) Color.parseColor("#F87171") else Color.parseColor("#DC2626")
 
-        // 1) 임의 기간 선택 카드
         val periodCard = buildPeriodFilterCard(isDark, compact = false).apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -615,7 +603,6 @@ class MainActivity : Activity() {
             if (type == "inc") totalInc += amount else totalExp += amount
         }
 
-        // 2) 요약 카드
         val summaryTitle = "${getPeriodDisplayLabel()} 합계 (${filteredList.size}건)"
         container.addView(
             buildSummaryCard(
@@ -631,7 +618,6 @@ class MainActivity : Activity() {
             )
         )
 
-        // 3) 슬림 액션 바 (1줄로 [검색] + [직접 추가] 배치하여 공간 최소화)
         val actionBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -659,14 +645,13 @@ class MainActivity : Activity() {
             }
         }
 
-        val searchBtnLabel = TextView(this).apply {
+        searchToggleBtn.addView(TextView(this).apply {
             text = if (currentQuery.isNotEmpty()) "🔍 \"$currentQuery\"" else if (isSearchExpanded) "🔍 검색 닫기" else "🔍 검색"
             textSize = sp(13f)
             setTypeface(null, Typeface.BOLD)
             setTextColor(if (isSearchingOrOpen) Color.WHITE else textPrimary)
             isSingleLine = true
-        }
-        searchToggleBtn.addView(searchBtnLabel)
+        })
 
         if (currentQuery.isNotEmpty()) {
             searchToggleBtn.addView(TextView(this).apply {
@@ -699,7 +684,6 @@ class MainActivity : Activity() {
         actionBar.addView(addModalBtn)
         container.addView(actionBar)
 
-        // 4) 검색창 (버튼을 눌렀을 때만 슬림하게 펼쳐짐)
         if (isSearchExpanded || currentQuery.isNotEmpty()) {
             val searchBoxCard = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -800,7 +784,6 @@ class MainActivity : Activity() {
             container.addView(searchBoxCard)
         }
 
-        // 5) 내역 리스트
         container.addView(TextView(this).apply {
             text = "내역 ${filteredList.size}건 (눌러서 상세 보기 · 수정)"
             setTextColor(textSecondary)
@@ -813,7 +796,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 2. [분석] 탭 (왼쪽 카테고리 목록 + 오른쪽 기간/통계/목록 통합 뷰)
+    // 2. [분석] 탭
     // =========================================================================
     private fun renderCombinedAnalysisTab(isDark: Boolean) {
         val bgSidebar = if (isDark) Color.parseColor("#18202C") else Color.parseColor("#E5E7EB")
@@ -848,7 +831,6 @@ class MainActivity : Activity() {
             }
         }
 
-        // [왼쪽] 카테고리 세로 목록 사이드바
         val leftScroll = ScrollView(this).apply {
             setBackgroundColor(bgSidebar)
             layoutParams = LinearLayout.LayoutParams(dp(92), ViewGroup.LayoutParams.MATCH_PARENT)
@@ -902,7 +884,6 @@ class MainActivity : Activity() {
         leftScroll.addView(leftList)
         splitRoot.addView(leftScroll)
 
-        // [오른쪽] 선택된 카테고리의 기간 설정 + 합계 + 분석 + 목록
         val rightScroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         }
@@ -1091,7 +1072,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 3. [설정] 탭 (알림 권한 · 이메일 연동 · 다크 모드 · 글자 크기 조절 · 데이터 관리)
+    // 3. [설정] 탭
     // =========================================================================
     private fun renderSettingsTab(isDark: Boolean, container: LinearLayout) {
         val bgCard = if (isDark) Color.parseColor("#1F2937") else Color.WHITE
@@ -1132,7 +1113,6 @@ class MainActivity : Activity() {
             return card
         }
 
-        // 1. 알림 접근 권한
         val granted = isNotificationGranted()
         container.addView(
             makeSettingCard(
@@ -1145,7 +1125,6 @@ class MainActivity : Activity() {
             }
         )
 
-        // 2. 이메일 본문 직접 연동
         val savedEmail = LedgerStorage.getEmailAddress(this)
         val savedProv = if (LedgerStorage.getEmailProvider(this) == "naver") "네이버 메일" else "Gmail"
         container.addView(
@@ -1159,7 +1138,6 @@ class MainActivity : Activity() {
             }
         )
 
-        // 3. 화면 테마 (다크모드)
         container.addView(
             makeSettingCard(
                 title = "🌓 화면 테마 설정",
@@ -1172,7 +1150,6 @@ class MainActivity : Activity() {
             }
         )
 
-        // 4. 글자 크기 조절 카드
         val fontCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = roundBg(bgCard, 12)
@@ -1228,7 +1205,6 @@ class MainActivity : Activity() {
         fontCard.addView(scaleRow)
         container.addView(fontCard)
 
-        // 5. 데이터 관리
         val count = LedgerStorage.getRecords(this).length()
         container.addView(
             makeSettingCard(
@@ -1252,7 +1228,7 @@ class MainActivity : Activity() {
     }
 
     // =========================================================================
-    // 공통 UI 빌더 및 팝업 다이얼로그 (다크 모드 텍스트 색상 완전 대응)
+    // 공통 UI 빌더 및 카드 렌더링 (총 금액 + 상세 품목별 개별 금액 구분 표기)
     // =========================================================================
     private fun buildSummaryCard(
         title: String,
@@ -1345,15 +1321,20 @@ class MainActivity : Activity() {
             val entryColor = if (type == "inc") incColor else expColor
 
             val itemCard = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
+                orientation = LinearLayout.VERTICAL
                 background = roundBg(bgCard, 10)
                 setPadding(dp(if (compact) 10 else 14), dp(10), dp(if (compact) 10 else 14), dp(10))
-                gravity = Gravity.CENTER_VERTICAL
                 layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply { bottomMargin = dp(7) }
                 setOnClickListener { showEditDialog(obj) }
+            }
+
+            // 상단 행: [카테고리 + 결제처 + 날짜] (좌) | [총 결제금액] (우)
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
             }
 
             val leftCol = LinearLayout(this).apply {
@@ -1363,6 +1344,7 @@ class MainActivity : Activity() {
 
             val topMeta = buildString {
                 append("[$category]")
+                if (quantity.isNotEmpty()) append(" · $quantity")
                 if (isAuto) append(" 🤖")
                 if (imagePath.isNotEmpty() && File(imagePath).exists()) append(" 📷")
             }
@@ -1381,31 +1363,48 @@ class MainActivity : Activity() {
                 setPadding(0, dp(2), 0, dp(2))
             })
 
-            val subInfo = buildString {
-                append(date)
-                if (item.isNotEmpty()) append(" · $item")
-                if (quantity.isNotEmpty()) append(" ($quantity)")
-            }
             leftCol.addView(TextView(this).apply {
-                text = subInfo
+                text = date
                 setTextColor(textSecondary)
                 textSize = sp(11f)
             })
-            itemCard.addView(leftCol)
+            topRow.addView(leftCol)
 
-            itemCard.addView(TextView(this).apply {
+            val rightCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.END
+                setPadding(dp(6), 0, 0, 0)
+            }
+            if (item.contains("\n")) {
+                rightCol.addView(TextView(this).apply {
+                    text = "총 결제금액"
+                    setTextColor(textSecondary)
+                    textSize = sp(9f)
+                })
+            }
+            rightCol.addView(TextView(this).apply {
                 text = "$sign${nf.format(amount)}원"
                 setTextColor(entryColor)
                 textSize = sp(if (compact) 13f else 15f)
                 setTypeface(null, Typeface.BOLD)
-                setPadding(dp(6), 0, 0, 0)
             })
+            topRow.addView(rightCol)
+            itemCard.addView(topRow)
+
+            // 하단 행: 상세 품목 및 개별 결제금액 목록 (있을 경우 구분선과 함께 표시)
+            if (item.isNotEmpty()) {
+                itemCard.addView(TextView(this).apply {
+                    text = item
+                    setTextColor(textSecondary)
+                    textSize = sp(if (compact) 11f else 12f)
+                    setPadding(0, dp(6), 0, 0)
+                })
+            }
 
             targetContainer.addView(itemCard)
         }
     }
 
-    // 내역 직접 추가 팝업 다이얼로그 (메인 화면 공간 절약 + 다크 모드 가독성 최적화)
     private fun showManualAddDialog() {
         val isDark = LedgerStorage.isDarkMode(this)
         val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
@@ -1474,7 +1473,7 @@ class MainActivity : Activity() {
         row1.addView(catSpinner)
         container.addView(row1)
 
-        fun makeInput(label: String, hintStr: String, isNumber: Boolean = false): EditText {
+        fun makeInput(label: String, hintStr: String, isNumber: Boolean = false, multiLine: Boolean = false): EditText {
             container.addView(TextView(this).apply {
                 text = label
                 textSize = sp(12f)
@@ -1486,15 +1485,19 @@ class MainActivity : Activity() {
                 hint = hintStr
                 textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
+                if (multiLine) {
+                    minLines = 2
+                    isSingleLine = false
+                }
                 styleDialogEditText(this, isDark)
                 container.addView(this)
             }
         }
 
         val merchantInput = makeInput("제목 / 결제처", "예: 쿠팡, 스타벅스")
-        val itemInput = makeInput("품목 (선택)", "예: 아메리카노")
-        val qtyInput = makeInput("수량 (선택)", "예: 2잔")
-        val amountInput = makeInput("금액 (원)", "숫자만 입력", isNumber = true)
+        val itemInput = makeInput("상세 품목 및 개별 금액 (선택)", "예: • 아메리카노 (2잔) : 9,000원", multiLine = true)
+        val qtyInput = makeInput("총 수량 (선택)", "예: 총 2개")
+        val amountInput = makeInput("총 결제금액 (원)", "숫자만 입력", isNumber = true)
 
         scroll.addView(container)
 
@@ -1530,7 +1533,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // 이메일 IMAP 직접 연동 설정 다이얼로그
     private fun showEmailConfigDialog() {
         val isDark = LedgerStorage.isDarkMode(this)
         val descColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
@@ -1634,7 +1636,7 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // 상세 보기 및 수정 다이얼로그
+    // 상세 보기 및 수정 다이얼로그 (품목별 분리 기능 포함)
     private fun showEditDialog(recordObj: JSONObject) {
         val isDark = LedgerStorage.isDarkMode(this)
         val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
@@ -1647,6 +1649,7 @@ class MainActivity : Activity() {
         val oldQty = recordObj.optString("quantity", "")
         val oldAmt = recordObj.optLong("amount", 0L)
         val oldRaw = recordObj.optString("raw", "")
+        val itemsJsonStr = recordObj.optString("itemsJson", "[]")
         var editedDateStr = recordObj.optString("date", "")
         var editedTimestamp = getRecordTimestamp(recordObj).let { if (it > 0L) it else System.currentTimeMillis() }
         pendingImagePath = recordObj.optString("imagePath", "")
@@ -1776,14 +1779,43 @@ class MainActivity : Activity() {
         }
 
         val merchantEdit = makeLabeledInput("제목 / 결제처", oldMerchant)
-        val itemEdit = makeLabeledInput("품목", oldItem)
-        val qtyEdit = makeLabeledInput("수량", oldQty)
-        val amtEdit = makeLabeledInput("금액 (원)", oldAmt.toString(), isNumber = true)
-        val rawEdit = makeLabeledInput("상세 내용 / 원본 전문 (전체 표시)", oldRaw, multiLine = true)
+        val itemEdit = makeLabeledInput("상세 품목 및 개별 금액", oldItem, multiLine = true)
+        val qtyEdit = makeLabeledInput("총 수량", oldQty)
+        val amtEdit = makeLabeledInput("총 결제금액 (원)", oldAmt.toString(), isNumber = true)
+        val rawEdit = makeLabeledInput("결제 요약 및 원본 전문", oldRaw, multiLine = true)
+
+        // 여러 품목이 포함된 경우 각 품목을 개별 가계부 행으로 분리할 수 있는 버튼 제공
+        val parsedItemsArr = try { JSONArray(itemsJsonStr) } catch (_: Exception) { JSONArray() }
+        var dialogRef: AlertDialog? = null
+
+        if (parsedItemsArr.length() >= 2) {
+            val splitBtn = Button(this).apply {
+                text = "✂️ ${parsedItemsArr.length()}개 품목을 각각 별도 내역으로 분리하기"
+                textSize = sp(12f)
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                background = roundBg(Color.parseColor("#2563EB"), 8)
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(10) }
+                setOnClickListener {
+                    LedgerStorage.splitRecordIntoItems(
+                        context = this@MainActivity,
+                        recordObj = recordObj,
+                        itemsArr = parsedItemsArr
+                    )
+                    dialogRef?.dismiss()
+                    refreshUI()
+                    Toast.makeText(this@MainActivity, "${parsedItemsArr.length()}건의 개별 내역으로 분리되었습니다.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            container.addView(splitBtn)
+        }
 
         scroll.addView(container)
 
-        AlertDialog.Builder(this, getDialogTheme(isDark))
+        dialogRef = AlertDialog.Builder(this, getDialogTheme(isDark))
             .setTitle("내역 상세 및 수정")
             .setView(scroll)
             .setPositiveButton("저장") { _, _ ->
@@ -1931,10 +1963,11 @@ class PaymentNotificationListener : NotificationListenerService() {
                     type = parsed.type,
                     category = parsed.category,
                     merchant = parsed.merchant,
-                    item = parsed.item,
-                    quantity = parsed.quantity,
+                    item = parsed.itemSummary,
+                    quantity = parsed.totalQuantity,
                     amount = parsed.amount,
-                    raw = fullText,
+                    raw = parsed.cleanRawText,
+                    itemsJson = parsed.itemsJson,
                     imagePath = imagePath,
                     auto = true
                 )
@@ -2079,10 +2112,11 @@ object EmailImapFetcher {
                         type = parsed.type,
                         category = parsed.category,
                         merchant = parsed.merchant,
-                        item = parsed.item,
-                        quantity = parsed.quantity,
+                        item = parsed.itemSummary,
+                        quantity = parsed.totalQuantity,
                         amount = parsed.amount,
-                        raw = fullText,
+                        raw = parsed.cleanRawText,
+                        itemsJson = parsed.itemsJson,
                         imagePath = "",
                         auto = true
                     )
@@ -2164,68 +2198,120 @@ object NotificationParser {
 
     private val KEYWORDS = listOf("승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드", "영수증", "KRW", "주문")
 
+    private val GENERIC_TAGS = listOf("web발신", "국외발신", "국제발신", "광고", "알림", "발신전용")
+
     private val PG_OR_GENERIC_NAMES = listOf(
         "메시지", "문자", "신한카드", "삼성카드", "현대카드", "KB국민카드", "롯데카드",
         "우리카드", "하나카드", "NH농협카드", "카카오페이", "네이버페이", "토스", "Gmail",
         "NHN KCP", "KCP", "KG이니시스", "이니시스", "토스페이먼츠", "나이스페이", "다날", "발신전용"
     )
 
+    data class LineItem(
+        val name: String,
+        val qty: Int,
+        val price: Long
+    )
+
     data class ParsedPayment(
         val type: String,
         val category: String,
         val merchant: String,
-        val item: String,
-        val quantity: String,
-        val amount: Long
+        val itemSummary: String,
+        val totalQuantity: String,
+        val amount: Long,
+        val cleanRawText: String,
+        val itemsJson: String
     )
 
     fun containsPaymentKeyword(text: String): Boolean {
         return KEYWORDS.any { text.contains(it) }
     }
 
-    fun parse(title: String, body: String, fullText: String): ParsedPayment? {
-        if (!containsPaymentKeyword(fullText)) return null
-
-        val amtRegex = Regex("""([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원|KRW\s*([0-9,]+)""")
-        val amtMatch = amtRegex.find(fullText) ?: return null
-        val rawNum = (amtMatch.groupValues[1].ifEmpty { amtMatch.groupValues[2] }).replace(",", "")
-        val amount = rawNum.toLongOrNull() ?: return null
-        if (amount <= 0L) return null
-
-        val isIncome = fullText.contains("입금") || fullText.contains("취소") || fullText.contains("환불")
-        val type = if (isIncome) "inc" else "exp"
-
-        val labeledMerchantRegex = Regex("""(?:구매상점명|가맹점명|상점명|사용처|결제처|판매자)\s*[:：]\s*([^\n\r]+)""")
-        val labeledMerchant = labeledMerchantRegex.find(fullText)?.groupValues?.get(1)?.trim() ?: ""
-
-        val labeledItemRegex = Regex("""(?:주문상품명|상품명|품목명|품목)\s*[:：]\s*([^\n\r]+)""")
-        var item = labeledItemRegex.find(fullText)?.groupValues?.get(1)?.trim() ?: ""
-
-        val totalCountRegex = Regex("""(총\s*[0-9]+\s*(?:건|개|종))""")
-        val standaloneQtyRegex = Regex("""([0-9]+\s*(?:개|잔|건|박스|병|팩|매|세트|봉|통|권))(?!입)""")
-        val searchTargetForQty = if (item.isNotEmpty()) item else body
-        val quantity = totalCountRegex.find(searchTargetForQty)?.groupValues?.get(1)?.trim()
-            ?: standaloneQtyRegex.find(searchTargetForQty)?.groupValues?.get(1)?.trim()
-            ?: ""
-
-        if (item.isEmpty() && quantity.isNotEmpty()) {
-            val fallbackItemRegex = Regex("""([가-힣a-zA-Z0-9\s\-]{2,25})\s*${Regex.escape(quantity)}""")
-            val candidateItem = fallbackItemRegex.find(body)?.groupValues?.get(1)?.trim() ?: ""
-            if (!candidateItem.matches(Regex("""^[0-9]+(?:ml|g|kg|L)$""", RegexOption.IGNORE_CASE))) {
-                item = candidateItem
+    // 하단의 불필요한 법적 고지·교환/반품 약관 문구 제거
+    private fun stripBoilerplate(raw: String): String {
+        val cutMarkers = listOf(
+            "채무 지급보증 서비스",
+            "상품의 교환/반품 안내",
+            "교환/반품 불가 사유",
+            "청약철회의 효력",
+            "소비자 피해보상",
+            "결제하신 물품에 대한",
+            "본 메일은 발신전용",
+            "이용약관",
+            "개인정보처리방침",
+            "고객센터 이용안내",
+            "전자금융거래"
+        )
+        var cutIndex = raw.length
+        for (marker in cutMarkers) {
+            val idx = raw.indexOf(marker)
+            if (idx in 20 until cutIndex) {
+                cutIndex = idx
             }
         }
+        return raw.substring(0, cutIndex).trim()
+    }
+
+    fun parse(title: String, body: String, fullText: String): ParsedPayment? {
+        val cleanBody = stripBoilerplate(fullText)
+        if (!containsPaymentKeyword(cleanBody)) return null
+
+        // 1. 총 결제금액 우선 추출 (첫 상품 단가 대신 실제 최종 결제금액)
+        val totalAmtRegex = Regex(
+            """(?:총\s*결제\s*금액|실\s*결제\s*금액|최종\s*결제\s*금액|총\s*주문\s*금액|결제\s*금액|승인\s*금액|출금\s*금액|입금\s*금액|합계\s*금액)\s*[:：]?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원"""
+        )
+        val cardAmtRegex = Regex(
+            """(?:카드|일시불|할부|페이)\s*(?:\([^)]*\))?\s*[:：/]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원"""
+        )
+        val fallbackAmtRegex = Regex("""([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원|KRW\s*([0-9,]+)""")
+
+        val rawNum = totalAmtRegex.find(cleanBody)?.groupValues?.get(1)
+            ?: cardAmtRegex.find(cleanBody)?.groupValues?.get(1)
+            ?: fallbackAmtRegex.find(cleanBody)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
+            ?: return null
+
+        val amount = rawNum.replace(",", "").toLongOrNull() ?: return null
+        if (amount <= 0L) return null
+
+        // 2. 수입(+) / 지출(-) 정확한 판별 ('부분취소카드' 등 카드명칭 오인식 배제)
+        val sanitizedForType = cleanBody
+            .replace("부분취소카드", "")
+            .replace(Regex("""할인금액\s*[:：]\s*-[0-9,]+원"""), "")
+
+        val isIncome = sanitizedForType.contains("결제취소") ||
+            sanitizedForType.contains("승인취소") ||
+            sanitizedForType.contains("주문취소") ||
+            sanitizedForType.contains("취소완료") ||
+            sanitizedForType.contains("환불완료") ||
+            sanitizedForType.contains("환불금액") ||
+            Regex("""(?:입금|급여|용돈|이체입금|계좌입금)\s*(?:완료|금액|[:：]|[0-9,]+원)""").containsMatchIn(sanitizedForType)
+
+        val type = if (isIncome) "inc" else "exp"
+
+        // 3. 결제처(상점명) 추출 ([쿠팡] 대괄호 브랜드 -> 명시적 라벨 -> 'OOO에서 주문하신')
+        val bracketBrand = Regex("""\[([^\]]+)]""").findAll(title)
+            .map { it.groupValues[1].trim() }
+            .firstOrNull { tag -> GENERIC_TAGS.none { tag.contains(it, ignoreCase = true) } } ?: ""
+
+        val labeledMerchantRegex = Regex("""(?:구매상점명|가맹점명|상점명|사용처|결제처)\s*[:：]\s*([^\n\r]+)""")
+        val labeledMerchant = labeledMerchantRegex.find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+        val orderedAtMerchant = Regex("""([가-힣a-zA-Z0-9()]{2,15})에서\s*(?:주문하신|결제하신)""")
+            .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
 
         val cleanTitle = title.replace(Regex("""\[.*?]"""), "").trim()
-        val isGenericTitle = cleanTitle.isEmpty() || PG_OR_GENERIC_NAMES.any {
-            cleanTitle.contains(it, ignoreCase = true)
-        }
+        val isGenericTitle = cleanTitle.isEmpty() ||
+            cleanTitle.contains("주문하신 내역") ||
+            cleanTitle.contains("결제 내역입니다") ||
+            PG_OR_GENERIC_NAMES.any { cleanTitle.contains(it, ignoreCase = true) }
 
         val merchant = when {
             labeledMerchant.isNotEmpty() -> labeledMerchant
+            bracketBrand.isNotEmpty() -> bracketBrand
+            orderedAtMerchant.isNotEmpty() -> orderedAtMerchant
             !isGenericTitle -> cleanTitle
             else -> {
-                val lines = body.replace(Regex("""\[.*?]"""), "")
+                val lines = cleanBody.replace(Regex("""\[.*?]"""), "")
                     .split("\n")
                     .map { it.trim() }
                     .filter { line ->
@@ -2233,28 +2319,140 @@ object NotificationParser {
                             !line.contains("잔액") &&
                             !line.contains("누적") &&
                             !line.contains("안전하게 결제") &&
+                            !line.contains("확인해주세요") &&
                             PG_OR_GENERIC_NAMES.none { pg -> line.equals(pg, ignoreCase = true) }
                     }
                 (lines.firstOrNull { it.contains("페이") || it.contains("마트") || it.contains("스토어") || it.contains("점") }
-                    ?: lines.lastOrNull()
+                    ?: lines.firstOrNull()
                     ?: "결제 내역").take(26)
             }
+        }
+
+        // 4. 상세 품목별 이름 · 수량 · 개별 결제금액 추출
+        val lineItems = extractLineItems(cleanBody)
+        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
+        val itemsJsonArr = JSONArray()
+
+        val itemSummary: String
+        val totalQuantity: String
+
+        if (lineItems.isNotEmpty()) {
+            var sumQty = 0
+            val sb = StringBuilder()
+            for (li in lineItems) {
+                sumQty += li.qty
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append("• ${li.name} (${li.qty}개) : ${nf.format(li.price)}원")
+
+                itemsJsonArr.put(JSONObject().apply {
+                    put("name", li.name)
+                    put("qty", li.qty)
+                    put("price", li.price)
+                })
+            }
+            itemSummary = sb.toString()
+            totalQuantity = if (lineItems.size >= 2) "총 ${sumQty}개" else "${sumQty}개"
+        } else {
+            // 단일 라벨 방식 보조 추출
+            val labeledItem = Regex("""(?:주문상품명|상품명|품목명|품목)\s*[:：]\s*([^\n\r]+)""")
+                .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val totalCountMatch = Regex("""(총\s*[0-9]+\s*(?:건|개|종))""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val singleQtyMatch = Regex("""([0-9]+\s*(?:개|잔|건|박스|병|팩|매|세트|봉|통|권))(?!입)""")
+                .find(if (labeledItem.isNotEmpty()) labeledItem else cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+            itemSummary = labeledItem
+            totalQuantity = totalCountMatch.ifEmpty { singleQtyMatch }
+        }
+
+        // 5. 상단 결제 요약이 포함된 깔끔한 상세 전문 구성
+        val discountText = Regex("""할인금액\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+        val shippingText = Regex("""배송비\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+        val formattedRaw = buildString {
+            append("[결제 요약]\n")
+            append("• 결제처: $merchant\n")
+            append("• 총 결제금액: ${nf.format(amount)}원")
+            if (discountText.isNotEmpty() || shippingText.isNotEmpty()) {
+                val extra = listOfNotNull(
+                    if (discountText.isNotEmpty()) "할인 $discountText" else null,
+                    if (shippingText.isNotEmpty()) "배송비 $shippingText" else null
+                ).joinToString(" / ")
+                append(" ($extra)")
+            }
+            append("\n")
+            if (itemSummary.isNotEmpty()) {
+                append("• 상세 품목별 금액:\n$itemSummary\n")
+            }
+            append("\n[원본 영수증 내용]\n")
+            append(cleanBody)
         }
 
         val category = if (isIncome) {
             "수입"
         } else {
-            classifyCategory("$merchant $item $fullText")
+            classifyCategory("$merchant $itemSummary $cleanBody")
         }
 
         return ParsedPayment(
             type = type,
             category = category,
             merchant = merchant.ifEmpty { "결제 내역" },
-            item = item,
-            quantity = quantity,
-            amount = amount
+            itemSummary = itemSummary,
+            totalQuantity = totalQuantity,
+            amount = amount,
+            cleanRawText = formattedRaw,
+            itemsJson = itemsJsonArr.toString()
         )
+    }
+
+    // 쿠팡/쇼핑몰 표 형식 영수증에서 각 상품명, 수량, 개별 결제금액 분리 추출
+    private fun extractLineItems(text: String): List<LineItem> {
+        val result = mutableListOf<LineItem>()
+        val lines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+
+        // 패턴 A: "상품명, 옵션, 1개 : 11,900원 : 1 : 11,900원 : 판매자"
+        val tableRowRegex = Regex(
+            """^(.+?)\s*:\s*([0-9,]+)원\s*:\s*([0-9]+)\s*:\s*([0-9,]+)원(?:\s*:.*)?$"""
+        )
+        // 패턴 B: "상품명 : 11,900원" (할인금액/배송비/총 결제금액 등 요약 라벨 제외)
+        val simpleRowRegex = Regex("""^(.+?)\s*:\s*([0-9,]+)원$""")
+        val skipLabels = listOf(
+            "상품 가격", "상품가격", "할인금액", "할인 금액", "배송비", "총 결제금액",
+            "결제금액", "실결제금액", "일시불", "할부", "카드", "승인금액", "포인트", "쿠폰"
+        )
+
+        for (line in lines) {
+            val mA = tableRowRegex.find(line)
+            if (mA != null) {
+                var rawName = mA.groupValues[1].trim()
+                val qty = mA.groupValues[3].toIntOrNull() ?: 1
+                val itemTotalPrice = mA.groupValues[4].replace(",", "").toLongOrNull() ?: 0L
+
+                // 상품명 끝에 붙은 중복 수량(", 1개") 정리
+                rawName = rawName.replace(Regex("""[,\s]+${qty}개$"""), "").trim()
+                if (rawName.isNotEmpty() && itemTotalPrice > 0L) {
+                    result.add(LineItem(rawName, qty, itemTotalPrice))
+                }
+                continue
+            }
+
+            val mB = simpleRowRegex.find(line)
+            if (mB != null) {
+                val labelPart = mB.groupValues[1].trim()
+                val pricePart = mB.groupValues[2].replace(",", "").toLongOrNull() ?: 0L
+                if (pricePart > 0L &&
+                    !labelPart.contains("/") &&
+                    skipLabels.none { labelPart.contains(it, ignoreCase = true) }
+                ) {
+                    val qtyInName = Regex("""[,\s]+([0-9]+)개$""").find(labelPart)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    val cleanName = labelPart.replace(Regex("""[,\s]+[0-9]+개$"""), "").trim()
+                    if (cleanName.length >= 2) {
+                        result.add(LineItem(cleanName, qtyInName, pricePart))
+                    }
+                }
+            }
+        }
+        return result
     }
 
     private fun classifyCategory(text: String): String {
@@ -2399,6 +2597,7 @@ object LedgerStorage {
             put("amount", amount)
             put("date", dateStr)
             put("raw", "직접 입력 내역")
+            put("itemsJson", "[]")
             put("imagePath", "")
             put("auto", false)
         }
@@ -2418,6 +2617,7 @@ object LedgerStorage {
         quantity: String,
         amount: Long,
         raw: String,
+        itemsJson: String,
         imagePath: String,
         auto: Boolean
     ) {
@@ -2438,6 +2638,7 @@ object LedgerStorage {
                         if (quantity.isNotEmpty()) existing.put("quantity", quantity)
                         if (merchant != "결제 내역") existing.put("merchant", merchant)
                         if (category != "기타") existing.put("category", category)
+                        if (itemsJson != "[]") existing.put("itemsJson", itemsJson)
                     }
                     if (imagePath.isNotEmpty() && existing.optString("imagePath").isEmpty()) {
                         existing.put("imagePath", imagePath)
@@ -2462,12 +2663,60 @@ object LedgerStorage {
             put("amount", amount)
             put("date", dateStr)
             put("raw", raw)
+            put("itemsJson", itemsJson)
             put("imagePath", imagePath)
             put("auto", auto)
         }
         newArr.put(record)
         for (i in 0 until oldArr.length()) {
             newArr.put(oldArr.getJSONObject(i))
+        }
+        save(context, newArr)
+    }
+
+    // 하나의 묶음 결제 내역을 상세 품목별 개별 내역으로 분리
+    fun splitRecordIntoItems(context: Context, recordObj: JSONObject, itemsArr: JSONArray) {
+        val targetId = recordObj.optString("id", "")
+        val type = recordObj.optString("type", "exp")
+        val category = recordObj.optString("category", "기타")
+        val merchant = recordObj.optString("merchant", "")
+        val dateStr = recordObj.optString("date", "")
+        val timestamp = recordObj.optLong("timestamp", System.currentTimeMillis())
+        val raw = recordObj.optString("raw", "")
+        val imagePath = recordObj.optString("imagePath", "")
+        val auto = recordObj.optBoolean("auto", true)
+
+        val oldArr = getRecords(context)
+        val newArr = JSONArray()
+
+        for (i in 0 until oldArr.length()) {
+            val cur = oldArr.getJSONObject(i)
+            if (cur.optString("id") == targetId) {
+                for (j in 0 until itemsArr.length()) {
+                    val itemObj = itemsArr.getJSONObject(j)
+                    val iName = itemObj.optString("name", "")
+                    val iQty = itemObj.optInt("qty", 1)
+                    val iPrice = itemObj.optLong("price", 0L)
+
+                    newArr.put(JSONObject().apply {
+                        put("id", "${timestamp}_${j}")
+                        put("timestamp", timestamp)
+                        put("type", type)
+                        put("category", category)
+                        put("merchant", "$merchant - $iName")
+                        put("item", "• $iName (${iQty}개) : ${NumberFormat.getNumberInstance(Locale.KOREA).format(iPrice)}원")
+                        put("quantity", "${iQty}개")
+                        put("amount", iPrice)
+                        put("date", dateStr)
+                        put("raw", raw)
+                        put("itemsJson", "[]")
+                        put("imagePath", imagePath)
+                        put("auto", auto)
+                    })
+                }
+            } else {
+                newArr.put(cur)
+            }
         }
         save(context, newArr)
     }
