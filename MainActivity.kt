@@ -53,6 +53,15 @@ import javax.mail.Message
 import javax.mail.Multipart
 import javax.mail.Session
 
+private fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+private fun Context.sp(base: Float): Float = base * LedgerStorage.getFontScale(this)
+private fun Context.roundBg(color: Int, radiusDp: Int): GradientDrawable {
+    return GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(radiusDp).toFloat()
+    }
+}
+
 class MainActivity : Activity() {
 
     companion object {
@@ -75,16 +84,6 @@ class MainActivity : Activity() {
     private var currentQuery = ""
     private var isSearchExpanded = false
 
-    // 탭·화면별 스크롤 위치 저장용 상태
-    private var allTabScrollY = 0
-    private var analysisLeftScrollY = 0
-    private var analysisRightScrollY = 0
-    private var settingsScrollY = 0
-    private var activeAllScroll: ScrollView? = null
-    private var activeAnalysisLeftScroll: ScrollView? = null
-    private var activeAnalysisRightScroll: ScrollView? = null
-    private var activeSettingsScroll: ScrollView? = null
-
     private val pieIncludedCategories = linkedSetOf(
         "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "기타"
     )
@@ -97,7 +96,7 @@ class MainActivity : Activity() {
 
     private val updateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            refreshUI(preserveScroll = true)
+            refreshUI()
         }
     }
 
@@ -108,13 +107,6 @@ class MainActivity : Activity() {
             else android.R.style.Theme_Material_Light_NoActionBar
         )
         super.onCreate(savedInstanceState)
-
-        if (savedInstanceState != null) {
-            allTabScrollY = savedInstanceState.getInt("allTabScrollY", 0)
-            analysisLeftScrollY = savedInstanceState.getInt("analysisLeftScrollY", 0)
-            analysisRightScrollY = savedInstanceState.getInt("analysisRightScrollY", 0)
-            settingsScrollY = savedInstanceState.getInt("settingsScrollY", 0)
-        }
 
         LedgerStorage.ensureDefaultRules(this)
         LedgerStorage.ensureDefaultEmailPeriod(this)
@@ -145,9 +137,8 @@ class MainActivity : Activity() {
                 if (!isNotificationGranted()) {
                     startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 } else {
-                    captureCurrentScrollPositions()
                     currentTab = "settings"
-                    refreshUI(preserveScroll = true)
+                    refreshUI()
                 }
             }
         }
@@ -181,31 +172,6 @@ class MainActivity : Activity() {
         setContentView(rootLayout)
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        captureCurrentScrollPositions()
-        outState.putInt("allTabScrollY", allTabScrollY)
-        outState.putInt("analysisLeftScrollY", analysisLeftScrollY)
-        outState.putInt("analysisRightScrollY", analysisRightScrollY)
-        outState.putInt("settingsScrollY", settingsScrollY)
-        super.onSaveInstanceState(outState)
-    }
-
-    private fun captureCurrentScrollPositions() {
-        activeAllScroll?.let { allTabScrollY = it.scrollY }
-        activeAnalysisLeftScroll?.let { analysisLeftScrollY = it.scrollY }
-        activeAnalysisRightScroll?.let { analysisRightScrollY = it.scrollY }
-        activeSettingsScroll?.let { settingsScrollY = it.scrollY }
-    }
-
-    private fun restoreScrollPosition(scrollView: ScrollView?, targetY: Int) {
-        if (scrollView == null || targetY <= 0) return
-        scrollView.post {
-            val maxScroll = (scrollView.getChildAt(0)?.height ?: 0) - scrollView.height
-            val safeY = if (maxScroll > 0) targetY.coerceAtMost(maxScroll) else targetY
-            scrollView.scrollTo(0, safeY)
-        }
-    }
-
     override fun onResume() {
         super.onResume()
         val filter = IntentFilter("com.myledger.app.UPDATE_LEDGER")
@@ -214,11 +180,10 @@ class MainActivity : Activity() {
         } else {
             registerReceiver(updateReceiver, filter)
         }
-        refreshUI(preserveScroll = true)
+        refreshUI()
     }
 
     override fun onPause() {
-        captureCurrentScrollPositions()
         super.onPause()
         try {
             unregisterReceiver(updateReceiver)
@@ -229,9 +194,8 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (currentTab != "all") {
-            captureCurrentScrollPositions()
             currentTab = "all"
-            refreshUI(preserveScroll = true)
+            refreshUI()
         } else {
             super.onBackPressed()
         }
@@ -242,16 +206,7 @@ class MainActivity : Activity() {
         return enabled.contains(packageName)
     }
 
-    private fun refreshUI(preserveScroll: Boolean = true) {
-        if (preserveScroll) {
-            captureCurrentScrollPositions()
-        } else {
-            allTabScrollY = 0
-            analysisLeftScrollY = 0
-            analysisRightScrollY = 0
-            settingsScrollY = 0
-        }
-
+    private fun refreshUI() {
         val isDark = LedgerStorage.isDarkMode(this)
 
         val bgPage = if (isDark) Color.parseColor("#0F0F0F") else Color.parseColor("#F4F4F6")
@@ -286,16 +241,10 @@ class MainActivity : Activity() {
 
         renderBottomNavBar(isDark)
 
-        activeAllScroll = null
-        activeAnalysisLeftScroll = null
-        activeAnalysisRightScroll = null
-        activeSettingsScroll = null
-
         contentHost.removeAllViews()
         when (currentTab) {
             "all" -> {
                 val scroll = ScrollView(this)
-                activeAllScroll = scroll
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(16), dp(4), dp(16), dp(24))
@@ -303,14 +252,12 @@ class MainActivity : Activity() {
                 renderAllTab(isDark, container)
                 scroll.addView(container)
                 contentHost.addView(scroll)
-                restoreScrollPosition(scroll, allTabScrollY)
             }
             "analysis" -> {
                 renderCombinedAnalysisTab(isDark)
             }
             "settings" -> {
                 val scroll = ScrollView(this)
-                activeSettingsScroll = scroll
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(16), dp(4), dp(16), dp(28))
@@ -318,7 +265,6 @@ class MainActivity : Activity() {
                 renderSettingsTab(isDark, container)
                 scroll.addView(container)
                 contentHost.addView(scroll)
-                restoreScrollPosition(scroll, settingsScrollY)
             }
         }
     }
@@ -346,9 +292,8 @@ class MainActivity : Activity() {
                 setPadding(dp(4), dp(2), dp(4), dp(2))
                 setOnClickListener {
                     if (currentTab != tabKey) {
-                        captureCurrentScrollPositions()
                         currentTab = tabKey
-                        refreshUI(preserveScroll = true)
+                        refreshUI()
                     }
                 }
             }
@@ -565,7 +510,7 @@ class MainActivity : Activity() {
         presetRow.addView(makePresetBtn("전체", isAllTime) {
             filterStartMillis = null
             filterEndMillis = null
-            refreshUI(preserveScroll = false)
+            refreshUI()
         })
 
         presetRow.addView(makePresetBtn("오늘", false) {
@@ -575,7 +520,7 @@ class MainActivity : Activity() {
             val d = cal.get(Calendar.DAY_OF_MONTH)
             filterStartMillis = startOfDay(y, m, d)
             filterEndMillis = endOfDay(y, m, d)
-            refreshUI(preserveScroll = false)
+            refreshUI()
         })
 
         presetRow.addView(makePresetBtn("이번 달", false) {
@@ -585,7 +530,7 @@ class MainActivity : Activity() {
             val lastDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
             filterStartMillis = startOfDay(y, m, 1)
             filterEndMillis = endOfDay(y, m, lastDay)
-            refreshUI(preserveScroll = false)
+            refreshUI()
         })
 
         presetRow.addView(makePresetBtn("최근 7일", false) {
@@ -593,7 +538,7 @@ class MainActivity : Activity() {
             val startCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -6) }
             filterStartMillis = startOfDay(startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH), startCal.get(Calendar.DAY_OF_MONTH))
             filterEndMillis = endOfDay(endCal.get(Calendar.YEAR), endCal.get(Calendar.MONTH), endCal.get(Calendar.DAY_OF_MONTH))
-            refreshUI(preserveScroll = false)
+            refreshUI()
         })
         card.addView(presetRow)
 
@@ -632,7 +577,7 @@ class MainActivity : Activity() {
                         if (filterEndMillis != null && filterEndMillis!! < chosenStart) {
                             filterEndMillis = endOfDay(y, m, d)
                         }
-                        refreshUI(preserveScroll = false)
+                        refreshUI()
                     },
                     initCal.get(Calendar.YEAR),
                     initCal.get(Calendar.MONTH),
@@ -670,7 +615,7 @@ class MainActivity : Activity() {
                         if (filterStartMillis != null && filterStartMillis!! > chosenEnd) {
                             filterStartMillis = startOfDay(y, m, d)
                         }
-                        refreshUI(preserveScroll = false)
+                        refreshUI()
                     },
                     initCal.get(Calendar.YEAR),
                     initCal.get(Calendar.MONTH),
@@ -780,7 +725,7 @@ class MainActivity : Activity() {
             }
             setOnClickListener {
                 isSearchExpanded = !isSearchExpanded
-                refreshUI(preserveScroll = true)
+                refreshUI()
             }
         }
 
@@ -801,7 +746,7 @@ class MainActivity : Activity() {
                 setOnClickListener {
                     currentQuery = ""
                     isSearchExpanded = false
-                    refreshUI(preserveScroll = true)
+                    refreshUI()
                 }
             })
         }
@@ -864,7 +809,7 @@ class MainActivity : Activity() {
                     if (q.isNotEmpty()) {
                         LedgerStorage.addSearchHistory(this@MainActivity, q)
                     }
-                    refreshUI(preserveScroll = false)
+                    refreshUI()
                 }
             }
             row.addView(searchInput)
@@ -903,7 +848,7 @@ class MainActivity : Activity() {
                         ).apply { rightMargin = dp(5) }
                         setOnClickListener {
                             currentQuery = word
-                            refreshUI(preserveScroll = false)
+                            refreshUI()
                         }
                     })
                 }
@@ -914,7 +859,7 @@ class MainActivity : Activity() {
                     setPadding(dp(4), dp(3), dp(4), dp(3))
                     setOnClickListener {
                         LedgerStorage.clearSearchHistory(this@MainActivity)
-                        refreshUI(preserveScroll = true)
+                        refreshUI()
                     }
                 })
                 historyScroll.addView(historyRow)
@@ -972,8 +917,6 @@ class MainActivity : Activity() {
             setBackgroundColor(bgSidebar)
             layoutParams = LinearLayout.LayoutParams(dp(98), ViewGroup.LayoutParams.MATCH_PARENT)
         }
-        activeAnalysisLeftScroll = leftScroll
-
         val leftList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(6), dp(6), dp(6), dp(16))
@@ -998,8 +941,7 @@ class MainActivity : Activity() {
                 ).apply { bottomMargin = dp(6) }
                 setOnClickListener {
                     selectedAnalysisCategory = cat
-                    analysisRightScrollY = 0
-                    refreshUI(preserveScroll = true)
+                    refreshUI()
                 }
             }
 
@@ -1028,8 +970,6 @@ class MainActivity : Activity() {
         val rightScroll = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         }
-        activeAnalysisRightScroll = rightScroll
-
         val rightContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(6), dp(12), dp(24))
@@ -1170,7 +1110,7 @@ class MainActivity : Activity() {
                         } else {
                             pieIncludedCategories.add(cat)
                         }
-                        refreshUI(preserveScroll = true)
+                        refreshUI()
                     }
                 }
                 selectorRow.addView(chip)
@@ -1264,9 +1204,6 @@ class MainActivity : Activity() {
         rightScroll.addView(rightContent)
         splitRoot.addView(rightScroll)
         contentHost.addView(splitRoot)
-
-        restoreScrollPosition(leftScroll, analysisLeftScrollY)
-        restoreScrollPosition(rightScroll, analysisRightScrollY)
     }
 
     private fun renderSettingsTab(isDark: Boolean, container: LinearLayout) {
@@ -1431,7 +1368,7 @@ class MainActivity : Activity() {
                     setPadding(dp(8), dp(2), dp(2), dp(2))
                     setOnClickListener {
                         LedgerStorage.removeAutoRule(this@MainActivity, rule.id)
-                        refreshUI(preserveScroll = true)
+                        refreshUI()
                     }
                 })
                 rulesBox.addView(rRow)
@@ -1444,7 +1381,7 @@ class MainActivity : Activity() {
             }
             applyRow.addView(makePillButton(isDark, "기존 내역에도 규칙 적용") {
                 val changed = LedgerStorage.applyAutoRulesToExistingRecords(this)
-                refreshUI(preserveScroll = true)
+                refreshUI()
                 Toast.makeText(this, "기존 내역 ${changed}건에 규칙이 반영되었습니다.", Toast.LENGTH_SHORT).show()
             })
             rulesBox.addView(applyRow)
@@ -1464,7 +1401,6 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
         rowDark.addView(makeToggleSwitch(isDark, isDark) {
-            captureCurrentScrollPositions()
             LedgerStorage.setDarkMode(this, !isDark)
             recreate()
         })
@@ -1494,7 +1430,7 @@ class MainActivity : Activity() {
             val isSelected = kotlin.math.abs(currentScale - scaleVal) < 0.02f
             val btn = makePillButton(isDark, label, isSelected) {
                 LedgerStorage.setFontScale(this@MainActivity, scaleVal)
-                refreshUI(preserveScroll = true)
+                refreshUI()
             }.apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                     rightMargin = dp(6)
@@ -1555,7 +1491,7 @@ class MainActivity : Activity() {
                 .setMessage("저장된 ${count}건의 모든 가계부 내역을 삭제하시겠습니까?")
                 .setPositiveButton("모두 삭제") { _, _ ->
                     LedgerStorage.clearAllRecords(this)
-                    refreshUI(preserveScroll = false)
+                    refreshUI()
                     Toast.makeText(this, "모든 내역이 초기화되었습니다.", Toast.LENGTH_SHORT).show()
                 }
                 .setNegativeButton("취소", null)
@@ -1652,7 +1588,7 @@ class MainActivity : Activity() {
                 }
                 val targetCat = if (action == "transfer") "이체/계좌이동" else catSpinner.selectedItem.toString()
                 LedgerStorage.addAutoRule(this, kw, action, targetCat)
-                refreshUI(preserveScroll = true)
+                refreshUI()
                 Toast.makeText(this, "\"$kw\" 규칙이 추가되었습니다.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("취소", null)
@@ -1867,7 +1803,6 @@ class MainActivity : Activity() {
     }
 
     private fun showManualAddDialog() {
-        captureCurrentScrollPositions()
         val isDark = LedgerStorage.isDarkMode(this)
         val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
 
@@ -1996,7 +1931,7 @@ class MainActivity : Activity() {
                         dateStr = selectedDateStr,
                         timestamp = selectedTimestamp
                     )
-                    refreshUI(preserveScroll = true)
+                    refreshUI()
                 } else {
                     Toast.makeText(this, "제목(또는 계좌)과 금액을 입력해 주세요.", Toast.LENGTH_SHORT).show()
                 }
@@ -2006,8 +1941,2047 @@ class MainActivity : Activity() {
     }
 
     private fun showEmailConfigDialog() {
-        captureCurrentScrollPositions()
         val isDark = LedgerStorage.isDarkMode(this)
         val descColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
         val labelColor = if (isDark) Color.parseColor("#F5F5F7") else Color.parseColor("#111827")
-        val statusBoxBg = if (
+        val statusBoxBg = if (isDark) Color.parseColor("#2C2C2E") else Color.parseColor("#E5E5EA")
+
+        var tempStart = LedgerStorage.getEmailPeriodStart(this)
+        var tempEnd = LedgerStorage.getEmailPeriodEnd(this)
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        val savedProv = LedgerStorage.getEmailProvider(this)
+        val savedAddr = LedgerStorage.getEmailAddress(this)
+        val provLabel = if (savedProv == "naver") "네이버 메일" else "Gmail"
+
+        val statusBanner = TextView(this).apply {
+            text = if (savedAddr.isNotEmpty()) {
+                "● 현재 연결된 이메일: $provLabel ($savedAddr)"
+            } else {
+                "○ 현재 연결된 이메일이 없습니다."
+            }
+            textSize = sp(13f)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(if (savedAddr.isNotEmpty()) Color.parseColor("#34D399") else descColor)
+            background = roundBg(statusBoxBg, 10)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+        box.addView(statusBanner)
+
+        val providerSpinner = makeThemedSpinner(
+            isDark,
+            listOf("Gmail (imap.gmail.com)", "네이버 메일 (imap.naver.com)"),
+            if (savedProv == "naver") 1 else 0
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        }
+        box.addView(providerSpinner)
+
+        val emailEdit = EditText(this).apply {
+            hint = "이메일 주소 (예: cksqlsgus@gmail.com)"
+            inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setText(savedAddr)
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        }
+        box.addView(emailEdit)
+
+        val passEdit = EditText(this).apply {
+            hint = "앱 비밀번호 (16자리, 띄어쓰기 없이 입력)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(LedgerStorage.getEmailPassword(this@MainActivity))
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(12) }
+        }
+        box.addView(passEdit)
+
+        box.addView(TextView(this).apply {
+            text = "자동으로 불러올 이메일 기간 설정"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(2), 0, dp(6))
+        })
+
+        val fmt = SimpleDateFormat("yyyy.MM.dd", Locale.KOREA)
+        val rangeDisplay = TextView(this).apply {
+            text = "${fmt.format(Date(tempStart))} ~ ${fmt.format(Date(tempEnd))}"
+            textSize = sp(13f)
+            gravity = Gravity.CENTER
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.parseColor("#34D399"))
+            background = roundBg(statusBoxBg, 10)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(6) }
+        }
+        box.addView(rangeDisplay)
+
+        fun updateRangeLabel() {
+            rangeDisplay.text = "${fmt.format(Date(tempStart))} ~ ${fmt.format(Date(tempEnd))}"
+        }
+
+        val presetRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(6) }
+        }
+
+        fun addRangePreset(label: String, daysBack: Int, isThisMonth: Boolean = false) {
+            val btn = makePillButton(isDark, label) {
+                val nowCal = Calendar.getInstance()
+                val y = nowCal.get(Calendar.YEAR)
+                val m = nowCal.get(Calendar.MONTH)
+                val d = nowCal.get(Calendar.DAY_OF_MONTH)
+                if (isThisMonth) {
+                    tempStart = startOfDay(y, m, 1)
+                    tempEnd = endOfDay(y, m, nowCal.getActualMaximum(Calendar.DAY_OF_MONTH))
+                } else {
+                    val startCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -daysBack) }
+                    tempStart = startOfDay(startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH), startCal.get(Calendar.DAY_OF_MONTH))
+                    tempEnd = endOfDay(y, m, d)
+                }
+                updateRangeLabel()
+            }.apply {
+                textSize = sp(11f)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    rightMargin = dp(4)
+                }
+            }
+            presetRow.addView(btn)
+        }
+
+        addRangePreset("오늘", 0)
+        addRangePreset("7일", 6)
+        addRangePreset("30일", 29)
+        addRangePreset("이번 달", 0, isThisMonth = true)
+        box.addView(presetRow)
+
+        val datePickRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(12) }
+        }
+        val startPickBtn = makePillButton(isDark, "시작일 변경") {
+            val cal = Calendar.getInstance().apply { timeInMillis = tempStart }
+            DatePickerDialog(
+                this@MainActivity,
+                getDialogTheme(isDark),
+                { _, y, m, d ->
+                    tempStart = startOfDay(y, m, d)
+                    if (tempEnd < tempStart) tempEnd = endOfDay(y, m, d)
+                    updateRangeLabel()
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(6)
+            }
+        }
+        val endPickBtn = makePillButton(isDark, "종료일 변경") {
+            val cal = Calendar.getInstance().apply { timeInMillis = tempEnd }
+            DatePickerDialog(
+                this@MainActivity,
+                getDialogTheme(isDark),
+                { _, y, m, d ->
+                    tempEnd = endOfDay(y, m, d)
+                    if (tempStart > tempEnd) tempStart = startOfDay(y, m, d)
+                    updateRangeLabel()
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        datePickRow.addView(startPickBtn)
+        datePickRow.addView(endPickBtn)
+        box.addView(datePickRow)
+
+        fun triggerEmailSync(startMs: Long, endMs: Long) {
+            Toast.makeText(this@MainActivity, "설정한 기간의 이메일 내역을 불러오는 중...", Toast.LENGTH_SHORT).show()
+            Thread {
+                val resultMsg = EmailImapFetcher.fetchEmailsInPeriod(this@MainActivity, startMs, endMs)
+                runOnUiThread {
+                    Toast.makeText(this@MainActivity, resultMsg, Toast.LENGTH_LONG).show()
+                    refreshUI()
+                }
+            }.start()
+        }
+
+        val syncNowBtn = makePillButton(isDark, "설정한 기간 이메일 지금 가져오기", isActive = true) {
+            val prov = if (providerSpinner.selectedItemPosition == 1) "naver" else "gmail"
+            val addr = emailEdit.text.toString().trim()
+            val pw = passEdit.text.toString().replace(" ", "").trim()
+            if (addr.isEmpty() || pw.isEmpty()) {
+                Toast.makeText(this@MainActivity, "이메일과 앱 비밀번호를 먼저 입력하세요.", Toast.LENGTH_SHORT).show()
+                return@makePillButton
+            }
+            LedgerStorage.saveEmailConfig(this@MainActivity, prov, addr, pw)
+            LedgerStorage.saveEmailPeriod(this@MainActivity, tempStart, tempEnd)
+            val pName = if (prov == "naver") "네이버 메일" else "Gmail"
+            statusBanner.text = "● 현재 연결된 이메일: $pName ($addr)"
+            statusBanner.setTextColor(Color.parseColor("#34D399"))
+            triggerEmailSync(tempStart, tempEnd)
+        }
+        box.addView(syncNowBtn)
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("이메일 본문 직접 연동")
+            .setView(scroll)
+            .setPositiveButton("저장 및 가져오기") { _, _ ->
+                val prov = if (providerSpinner.selectedItemPosition == 1) "naver" else "gmail"
+                val addr = emailEdit.text.toString().trim()
+                val pw = passEdit.text.toString().replace(" ", "").trim()
+                LedgerStorage.saveEmailConfig(this, prov, addr, pw)
+                LedgerStorage.saveEmailPeriod(this, tempStart, tempEnd)
+                refreshUI()
+                if (addr.isNotEmpty() && pw.isNotEmpty()) {
+                    triggerEmailSync(tempStart, tempEnd)
+                }
+            }
+            .setNeutralButton("연동 해제") { _, _ ->
+                LedgerStorage.saveEmailConfig(this, "gmail", "", "")
+                refreshUI()
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showEditDialog(recordObj: JSONObject) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val recordId = recordObj.optString("id", "")
+        val oldType = recordObj.optString("type", "exp")
+        val oldCat = recordObj.optString("category", "기타")
+        val oldMerchant = recordObj.optString("merchant", recordObj.optString("desc", ""))
+        val oldFrom = recordObj.optString("fromAccount", "")
+        val oldTo = recordObj.optString("toAccount", "")
+        val oldItem = recordObj.optString("item", "")
+        val oldQty = recordObj.optString("quantity", "")
+        val oldAmt = recordObj.optLong("amount", 0L)
+        val oldRaw = recordObj.optString("raw", "")
+        val itemsJsonStr = recordObj.optString("itemsJson", "[]")
+        var editedDateStr = recordObj.optString("date", "")
+        var editedTimestamp = getRecordTimestamp(recordObj).let { if (it > 0L) it else System.currentTimeMillis() }
+        pendingImagePath = recordObj.optString("imagePath", "")
+
+        val scroll = ScrollView(this)
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        val dateRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(8))
+        }
+        val dateText = TextView(this).apply {
+            text = "기록 일시: $editedDateStr"
+            textSize = sp(13f)
+            setTextColor(labelColor)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        dateRow.addView(dateText)
+        dateRow.addView(makePillButton(isDark, "날짜변경") {
+            val cal = Calendar.getInstance().apply { timeInMillis = editedTimestamp }
+            DatePickerDialog(
+                this@MainActivity,
+                getDialogTheme(isDark),
+                { _, y, m, d ->
+                    cal.set(Calendar.YEAR, y)
+                    cal.set(Calendar.MONTH, m)
+                    cal.set(Calendar.DAY_OF_MONTH, d)
+                    editedTimestamp = cal.timeInMillis
+                    editedDateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(editedTimestamp))
+                    dateText.text = "기록 일시: $editedDateStr"
+                },
+                cal.get(Calendar.YEAR),
+                cal.get(Calendar.MONTH),
+                cal.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        })
+        container.addView(dateRow)
+
+        val imgView = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(160)
+            ).apply { bottomMargin = dp(8) }
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            visibility = View.GONE
+        }
+        if (pendingImagePath.isNotEmpty() && File(pendingImagePath).exists()) {
+            val bmp = BitmapFactory.decodeFile(pendingImagePath)
+            if (bmp != null) {
+                imgView.setImageBitmap(bmp)
+                imgView.visibility = View.VISIBLE
+            }
+        }
+        dialogImageView = imgView
+        container.addView(imgView)
+
+        val attachBtn = makePillButton(isDark, "영수증 / 이미지 첨부") {
+            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "image/*"
+            }
+            startActivityForResult(Intent.createChooser(intent, "이미지 선택"), REQ_PICK_IMAGE)
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+        container.addView(attachBtn)
+
+        val spinnerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, dp(4))
+        }
+        val initialTypeIdx = when (oldType) {
+            "inc" -> 1
+            "trn" -> 2
+            else -> 0
+        }
+        val typeSpinner = makeThemedSpinner(
+            isDark,
+            listOf("- (지출)", "+ (수입)", "⇄ (이체)"),
+            initialTypeIdx
+        ).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(6)
+            }
+        }
+        val catIdx = NotificationParser.CATEGORIES.indexOf(oldCat).coerceAtLeast(0)
+        val catSpinner = makeThemedSpinner(isDark, NotificationParser.CATEGORIES, catIdx).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.3f)
+        }
+        spinnerRow.addView(typeSpinner)
+        spinnerRow.addView(catSpinner)
+        container.addView(spinnerRow)
+
+        fun makeLabeledInput(label: String, initial: String, isNumber: Boolean = false, multiLine: Boolean = false): EditText {
+            container.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(8), 0, dp(3))
+            })
+            return EditText(this).apply {
+                setText(initial)
+                textSize = sp(14f)
+                if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
+                if (multiLine) {
+                    minLines = 3
+                    isSingleLine = false
+                }
+                styleDialogEditText(this, isDark)
+                container.addView(this)
+            }
+        }
+
+        val merchantEdit = makeLabeledInput("제목 / 이동 경로", oldMerchant)
+        val fromEdit = makeLabeledInput("보낸 곳 / 결제수단", oldFrom)
+        val toEdit = makeLabeledInput("받는 곳 / 입금 계좌", oldTo)
+        val itemEdit = makeLabeledInput("상세 품목 및 개별 금액", oldItem, multiLine = true)
+        val qtyEdit = makeLabeledInput("총 수량", oldQty)
+        val amtEdit = makeLabeledInput("금액 (원)", oldAmt.toString(), isNumber = true)
+        val rawEdit = makeLabeledInput("결제 요약 및 원본 전문", oldRaw, multiLine = true)
+
+        val parsedItemsArr = try { JSONArray(itemsJsonStr) } catch (_: Exception) { JSONArray() }
+        var dialogRef: AlertDialog? = null
+
+        if (parsedItemsArr.length() >= 2) {
+            val splitBtn = makePillButton(isDark, "${parsedItemsArr.length()}개 품목을 각각 별도 내역으로 분리", isActive = true) {
+                LedgerStorage.splitRecordIntoItems(
+                    context = this@MainActivity,
+                    recordObj = recordObj,
+                    itemsArr = parsedItemsArr
+                )
+                dialogRef?.dismiss()
+                refreshUI()
+                Toast.makeText(this@MainActivity, "${parsedItemsArr.length()}건의 개별 내역으로 분리되었습니다.", Toast.LENGTH_SHORT).show()
+            }.apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(12) }
+            }
+            container.addView(splitBtn)
+        }
+
+        scroll.addView(container)
+
+        dialogRef = AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("내역 상세 및 수정")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val newType = when (typeSpinner.selectedItemPosition) {
+                    1 -> "inc"
+                    2 -> "trn"
+                    else -> "exp"
+                }
+                val newCat = catSpinner.selectedItem.toString()
+                val newFrom = fromEdit.text.toString().trim()
+                val newTo = toEdit.text.toString().trim()
+                var newMerchant = merchantEdit.text.toString().trim().ifEmpty { oldMerchant }
+                if (newType == "trn" && (newFrom != oldFrom || newTo != oldTo) && (newFrom.isNotEmpty() || newTo.isNotEmpty())) {
+                    if (newMerchant.contains("→") || newMerchant.matches(Regex("^[0-9\\-]+$"))) {
+                        newMerchant = "${newFrom.ifEmpty { "출금" }} → ${newTo.ifEmpty { "입금" }}"
+                    }
+                }
+                val newItem = itemEdit.text.toString().trim()
+                val newQty = qtyEdit.text.toString().trim()
+                val newAmt = amtEdit.text.toString().trim().toLongOrNull() ?: oldAmt
+                val newRaw = rawEdit.text.toString().trim()
+
+                LedgerStorage.updateRecord(
+                    context = this,
+                    id = recordId,
+                    type = newType,
+                    category = newCat,
+                    merchant = newMerchant,
+                    fromAccount = newFrom,
+                    toAccount = newTo,
+                    item = newItem,
+                    quantity = newQty,
+                    amount = newAmt,
+                    raw = newRaw,
+                    imagePath = pendingImagePath,
+                    dateStr = editedDateStr,
+                    timestamp = editedTimestamp
+                )
+                dialogImageView = null
+                refreshUI()
+            }
+            .setNeutralButton("삭제") { _, _ ->
+                LedgerStorage.deleteRecordById(this, recordId)
+                dialogImageView = null
+                refreshUI()
+            }
+            .setNegativeButton("취소") { _, _ ->
+                dialogImageView = null
+            }
+            .show()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK) return
+        val uri: Uri = data?.data ?: return
+
+        when (requestCode) {
+            REQ_PICK_IMAGE -> {
+                try {
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        val bmp = BitmapFactory.decodeStream(input)
+                        if (bmp != null) {
+                            val savedPath = LedgerStorage.saveBitmapToFile(this, bmp)
+                            if (savedPath.isNotEmpty()) {
+                                pendingImagePath = savedPath
+                                dialogImageView?.setImageBitmap(bmp)
+                                dialogImageView?.visibility = View.VISIBLE
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+
+            REQ_EXPORT_JSON -> {
+                try {
+                    val jsonStr = LedgerStorage.exportBackupJson(this)
+                    contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(jsonStr.toByteArray(Charsets.UTF_8))
+                        out.flush()
+                    }
+                    val count = LedgerStorage.getRecords(this).length()
+                    Toast.makeText(this, "가계부 기록 ${count}건을 파일로 내보냈습니다.", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "내보내기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+
+            REQ_IMPORT_JSON -> {
+                try {
+                    val content = contentResolver.openInputStream(uri)?.use { input ->
+                        BufferedReader(InputStreamReader(input, Charsets.UTF_8)).readText()
+                    } ?: ""
+                    val previewCount = LedgerStorage.countRecordsInBackupJson(content)
+                    if (previewCount < 0) {
+                        Toast.makeText(this, "올바른 가계부 백업 JSON 파일이 아닙니다.", Toast.LENGTH_LONG).show()
+                        return
+                    }
+                    val isDark = LedgerStorage.isDarkMode(this)
+                    AlertDialog.Builder(this, getDialogTheme(isDark))
+                        .setTitle("가계부 기록 가져오기")
+                        .setMessage("파일에서 총 ${previewCount}건의 거래 내역을 찾았습니다.\n어떤 방식으로 불러올까요?")
+                        .setPositiveButton("기존 내역에 합치기") { _, _ ->
+                            val added = LedgerStorage.importBackupJson(this, content, overwrite = false)
+                            refreshUI()
+                            Toast.makeText(this, "새 내역 ${added}건을 합쳤습니다. (중복 제외)", Toast.LENGTH_LONG).show()
+                        }
+                        .setNeutralButton("기존 내역 덮어쓰기") { _, _ ->
+                            val total = LedgerStorage.importBackupJson(this, content, overwrite = true)
+                            refreshUI()
+                            Toast.makeText(this, "총 ${total}건으로 복원되었습니다.", Toast.LENGTH_LONG).show()
+                        }
+                        .setNegativeButton("취소", null)
+                        .show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "가져오기 실패: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+}
+
+data class PieSlice(
+    val label: String,
+    val value: Long,
+    val color: Int
+)
+
+class PieChartView(
+    context: Context,
+    private val slices: List<PieSlice>,
+    private val holeColor: Int,
+    private val primaryTextColor: Int,
+    private val secondaryTextColor: Int
+) : View(context) {
+
+    private val arcPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val holePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = holeColor
+    }
+    private val sliceTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    private val centerTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = secondaryTextColor
+        textAlign = Paint.Align.CENTER
+    }
+    private val centerValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = primaryTextColor
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+
+        val cx = w / 2f
+        val cy = h / 2f
+        val radius = minOf(w, h) * 0.44f
+        val innerRadius = radius * 0.54f
+        val oval = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+
+        val total = slices.sumOf { it.value }
+        if (total <= 0L) {
+            arcPaint.color = Color.parseColor("#3A3A3C")
+            canvas.drawCircle(cx, cy, radius, arcPaint)
+            canvas.drawCircle(cx, cy, innerRadius, holePaint)
+            centerTitlePaint.textSize = radius * 0.16f
+            canvas.drawText("표시할 데이터 없음", cx, cy + (radius * 0.05f), centerTitlePaint)
+            return
+        }
+
+        val gapAngle = if (slices.size > 1) 1.5f else 0f
+        var startAngle = -90f
+        sliceTextPaint.textSize = radius * 0.13f
+
+        for (slice in slices) {
+            val rawSweep = (slice.value.toFloat() / total.toFloat()) * 360f
+            val sweep = (rawSweep - gapAngle).coerceAtLeast(1f)
+            arcPaint.color = slice.color
+            canvas.drawArc(oval, startAngle, sweep, true, arcPaint)
+
+            if (rawSweep >= 26f) {
+                val midRad = Math.toRadians((startAngle + rawSweep / 2f).toDouble())
+                val textR = (radius + innerRadius) / 2f
+                val tx = cx + (textR * Math.cos(midRad)).toFloat()
+                val ty = cy + (textR * Math.sin(midRad)).toFloat() + (sliceTextPaint.textSize * 0.35f)
+                val pctInt = ((slice.value.toDouble() / total.toDouble()) * 100).toInt()
+                canvas.drawText("$pctInt%", tx, ty, sliceTextPaint)
+            }
+            startAngle += rawSweep
+        }
+
+        canvas.drawCircle(cx, cy, innerRadius, holePaint)
+        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
+        centerTitlePaint.textSize = radius * 0.13f
+        centerValuePaint.textSize = radius * 0.16f
+
+        canvas.drawText("선택 합계", cx, cy - (radius * 0.05f), centerTitlePaint)
+        canvas.drawText("${nf.format(total)}원", cx, cy + (radius * 0.14f), centerValuePaint)
+    }
+}
+
+class PaymentNotificationListener : NotificationListenerService() {
+
+    private var lastSignature = ""
+    private var lastTime = 0L
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                requestRebind(ComponentName(this, PaymentNotificationListener::class.java))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        val pkg = sbn?.packageName ?: return
+        if (pkg == packageName) return
+
+        val notif = sbn.notification ?: return
+        if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
+
+        val extras = notif.extras ?: return
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim() ?: ""
+        val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+
+        val linesBuilder = StringBuilder()
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        textLines?.forEach { line ->
+            if (!line.isNullOrBlank()) linesBuilder.append("\n").append(line.toString().trim())
+        }
+
+        val bundleMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        bundleMessages?.forEach { parcel ->
+            if (parcel is Bundle) {
+                val mSender = parcel.getCharSequence("sender")?.toString()?.trim() ?: ""
+                val mText = parcel.getCharSequence("text")?.toString()?.trim() ?: ""
+                if (mText.isNotEmpty()) {
+                    linesBuilder.append("\n")
+                    if (mSender.isNotEmpty()) linesBuilder.append("$mSender: ")
+                    linesBuilder.append(mText)
+                }
+            }
+        }
+
+        val mainBody = if (bigText.length > text.length) bigText else text
+        val combinedBody = buildString {
+            append(mainBody)
+            if (subText.isNotEmpty() && !mainBody.contains(subText)) append("\n$subText")
+            val extraLinesStr = linesBuilder.toString().trim()
+            if (extraLinesStr.isNotEmpty() && !mainBody.contains(extraLinesStr)) {
+                append("\n$extraLinesStr")
+            }
+        }.trim()
+
+        var fullText = "$title\n$combinedBody".trim()
+        if (fullText.isEmpty()) return
+
+        val pkgLower = pkg.lowercase(Locale.ROOT)
+        val isSmsApp = pkgLower.contains("messaging") || pkgLower.contains("sms") || pkgLower.contains("mms")
+        val isEmailApp = pkgLower.contains("gm") || pkgLower.contains("mail") || pkgLower.contains("outlook")
+
+        if (isSmsApp) {
+            val smsFullBody = readLatestInboxSms(title, combinedBody)
+            if (smsFullBody.isNotEmpty()) {
+                fullText = "$title\n$smsFullBody"
+            }
+        }
+
+        val autoRules = LedgerStorage.getAutoRules(this)
+        val parsed = NotificationParser.parse(title, fullText, fullText, autoRules)
+        if (parsed != null) {
+            val sig = "$pkg|${parsed.merchant}|${parsed.amount}"
+            val now = System.currentTimeMillis()
+            if (sig != lastSignature || now - lastTime >= 5000L) {
+                lastSignature = sig
+                lastTime = now
+
+                val bmp = extractBitmap(extras, isSmsApp)
+                val imagePath = if (bmp != null) LedgerStorage.saveBitmapToFile(this, bmp) else ""
+                val recordTs = parsed.parsedTimestamp ?: now
+
+                LedgerStorage.addOrMergeRecord(
+                    context = this,
+                    type = parsed.type,
+                    category = parsed.category,
+                    merchant = parsed.merchant,
+                    fromAccount = parsed.fromAccount,
+                    toAccount = parsed.toAccount,
+                    balanceInfo = parsed.balanceInfo,
+                    item = parsed.itemSummary,
+                    quantity = parsed.totalQuantity,
+                    amount = parsed.amount,
+                    raw = parsed.cleanRawText,
+                    itemsJson = parsed.itemsJson,
+                    imagePath = imagePath,
+                    auto = true,
+                    customTimestamp = recordTs
+                )
+                sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").setPackage(packageName))
+            }
+        }
+
+        if (isEmailApp && LedgerStorage.getEmailAddress(this).isNotEmpty()) {
+            Thread {
+                try {
+                    Thread.sleep(2000L)
+                    val now = System.currentTimeMillis()
+                    EmailImapFetcher.fetchEmailsInPeriod(this, now - 180_000L, now + 60_000L)
+                    sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").setPackage(packageName))
+                } catch (_: Exception) {
+                }
+            }.start()
+        }
+    }
+
+    private fun readLatestInboxSms(senderTitle: String, snippet: String): String {
+        if (checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return ""
+        }
+        return try {
+            val now = System.currentTimeMillis()
+            val cursor = contentResolver.query(
+                Telephony.Sms.Inbox.CONTENT_URI,
+                arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                "${Telephony.Sms.DATE} > ?",
+                arrayOf((now - 30_000L).toString()),
+                "${Telephony.Sms.DATE} DESC"
+            )
+            cursor?.use { c ->
+                val bodyIdx = c.getColumnIndex(Telephony.Sms.BODY)
+                val addrIdx = c.getColumnIndex(Telephony.Sms.ADDRESS)
+                var bestMatch = ""
+                while (c.moveToNext()) {
+                    val body = if (bodyIdx >= 0) c.getString(bodyIdx) ?: "" else ""
+                    val addr = if (addrIdx >= 0) c.getString(addrIdx) ?: "" else ""
+                    if (body.isEmpty()) continue
+                    if (snippet.length >= 6 && body.contains(snippet.take(10))) {
+                        return body
+                    }
+                    if (senderTitle.isNotEmpty() && addr.contains(senderTitle.replace("-", ""))) {
+                        bestMatch = body
+                    }
+                    if (bestMatch.isEmpty() && NotificationParser.containsPaymentKeyword(body)) {
+                        bestMatch = body
+                    }
+                }
+                bestMatch
+            } ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun extractBitmap(extras: Bundle, isSmsApp: Boolean): Bitmap? {
+        val pic = extras.get(Notification.EXTRA_PICTURE)
+        if (pic is Bitmap) return pic
+        if (isSmsApp) return null
+
+        val largeBig = extras.get(Notification.EXTRA_LARGE_ICON_BIG)
+        if (largeBig is Bitmap) return largeBig
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && largeBig is Icon) {
+            return drawableToBitmap(largeBig.loadDrawable(this))
+        }
+        return null
+    }
+
+    private fun drawableToBitmap(drawable: Drawable?): Bitmap? {
+        if (drawable == null) return null
+        if (drawable is BitmapDrawable && drawable.bitmap != null) return drawable.bitmap
+        val w = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 128
+        val h = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 128
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, canvas.width, canvas.height)
+        drawable.draw(canvas)
+        return bitmap
+    }
+}
+
+object EmailImapFetcher {
+
+    fun fetchEmailsInPeriod(context: Context, startMillis: Long, endMillis: Long): String {
+        val provider = LedgerStorage.getEmailProvider(context)
+        val email = LedgerStorage.getEmailAddress(context)
+        val password = LedgerStorage.getEmailPassword(context)
+        if (email.isEmpty() || password.isEmpty()) {
+            return "이메일 설정이 비어 있습니다."
+        }
+
+        val host = if (provider == "naver") "imap.naver.com" else "imap.gmail.com"
+        return try {
+            val props = Properties().apply {
+                put("mail.store.protocol", "imaps")
+                put("mail.imaps.host", host)
+                put("mail.imaps.port", "993")
+                put("mail.imaps.ssl.enable", "true")
+                put("mail.imaps.connectiontimeout", "12000")
+                put("mail.imaps.timeout", "12000")
+            }
+
+            val session = Session.getInstance(props)
+            val store = session.getStore("imaps")
+            store.connect(host, email, password)
+
+            val inbox = store.getFolder("INBOX")
+            inbox.open(Folder.READ_ONLY)
+
+            val total = inbox.messageCount
+            if (total == 0) {
+                inbox.close(false)
+                store.close()
+                return "받은편지함이 비어 있습니다."
+            }
+
+            val startIdx = maxOf(1, total - 299)
+            val messages = inbox.getMessages(startIdx, total)
+            val fp = FetchProfile().apply {
+                add(FetchProfile.Item.ENVELOPE)
+            }
+            inbox.fetch(messages, fp)
+
+            var importedCount = 0
+            var olderStreak = 0
+            val autoRules = LedgerStorage.getAutoRules(context)
+
+            for (i in messages.indices.reversed()) {
+                val msg = messages[i]
+                val receivedTime = msg.receivedDate?.time ?: msg.sentDate?.time ?: continue
+
+                if (receivedTime > endMillis) continue
+                if (receivedTime < startMillis) {
+                    olderStreak++
+                    if (olderStreak >= 10) break
+                    continue
+                }
+                olderStreak = 0
+
+                val subject = msg.subject ?: ""
+                val bodyText = extractMessageText(msg)
+                val fullText = "$subject\n$bodyText".trim()
+
+                val parsed = NotificationParser.parse(subject, fullText, fullText, autoRules)
+                if (parsed != null) {
+                    val recordTs = parsed.parsedTimestamp ?: receivedTime
+                    val inserted = LedgerStorage.addOrMergeRecord(
+                        context = context,
+                        type = parsed.type,
+                        category = parsed.category,
+                        merchant = parsed.merchant,
+                        fromAccount = parsed.fromAccount,
+                        toAccount = parsed.toAccount,
+                        balanceInfo = parsed.balanceInfo,
+                        item = parsed.itemSummary,
+                        quantity = parsed.totalQuantity,
+                        amount = parsed.amount,
+                        raw = parsed.cleanRawText,
+                        itemsJson = parsed.itemsJson,
+                        imagePath = "",
+                        auto = true,
+                        customTimestamp = recordTs
+                    )
+                    if (inserted) importedCount++
+                }
+            }
+
+            inbox.close(false)
+            store.close()
+
+            if (importedCount > 0) {
+                "연동 완료! 설정 기간 내 결제 메일 ${importedCount}건을 가져왔습니다."
+            } else {
+                "연동 완료! (설정 기간 내 새로 추가할 결제 메일이 없습니다)"
+            }
+        } catch (e: Exception) {
+            "연동 실패: ${e.message ?: "이메일/앱 비밀번호를 확인하세요"}"
+        }
+    }
+
+    private fun extractMessageText(message: Message): String {
+        return try {
+            val content = message.content
+            when (content) {
+                is String -> htmlToStructuredText(content)
+                is Multipart -> extractFromMultipart(content)
+                else -> ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun extractFromMultipart(multipart: Multipart): String {
+        var plainText = ""
+        var htmlText = ""
+        for (i in 0 until multipart.count) {
+            val part = multipart.getBodyPart(i)
+            val content = part.content
+            if (part.isMimeType("text/plain") && content is String) {
+                plainText += "\n" + content
+            } else if (part.isMimeType("text/html") && content is String) {
+                htmlText += "\n" + htmlToStructuredText(content)
+            } else if (content is Multipart) {
+                val nested = extractFromMultipart(content)
+                if (nested.isNotEmpty()) htmlText += "\n" + nested
+            }
+        }
+        return if (htmlText.trim().length >= plainText.trim().length) {
+            htmlText.trim()
+        } else {
+            plainText.trim()
+        }
+    }
+
+    private fun htmlToStructuredText(rawHtml: String): String {
+        if (!rawHtml.contains("<")) return rawHtml.trim()
+        val withMarkers = rawHtml
+            .replace(Regex("(?i)</(tr|p|div|li|h[1-6])>|<br\\s*/?>"), "___NL___")
+            .replace(Regex("(?i)</(td|th)>"), " : ")
+        val plain = Jsoup.parse(withMarkers).text()
+        return plain.split("___NL___")
+            .map { line ->
+                line.replace(Regex("\\s+"), " ")
+                    .replace(Regex("^[:\\s]+|[:\\s]+$"), "")
+                    .trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+    }
+}
+
+data class AutoRule(
+    val id: String,
+    val keyword: String,
+    val action: String,
+    val category: String
+)
+
+object NotificationParser {
+
+    val CATEGORIES = listOf(
+        "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "이체/계좌이동", "수입", "기타"
+    )
+
+    private val KEYWORDS = listOf(
+        "승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드",
+        "영수증", "KRW", "₩", "주문", "송금", "월회비", "구독", "갱신"
+    )
+
+    private val GENERIC_TAGS = listOf(
+        "web발신", "국외발신", "국제발신", "광고", "알림", "발신전용",
+        "신용카드", "체크카드", "계좌이체", "휴대폰결제", "간편결제", "카드", "현금영수증"
+    )
+
+    private val BANK_NAMES = listOf(
+        "NH농협", "농협", "KB국민", "국민", "신한", "우리", "하나", "IBK기업", "기업",
+        "카카오뱅크", "토스뱅크", "케이뱅크", "새마을금고", "새마을", "우체국", "수협", "신협",
+        "대구", "부산", "경남", "광주", "전북", "제주", "SC제일", "씨티"
+    )
+
+    private val PG_OR_GENERIC_NAMES = listOf(
+        "메시지", "문자", "신용카드", "체크카드", "신한카드", "삼성카드", "현대카드", "KB국민카드", "롯데카드",
+        "우리카드", "하나카드", "NH농협카드", "카카오페이", "네이버페이", "토스", "Gmail",
+        "NHN KCP", "KCP", "KG이니시스", "이니시스", "토스페이먼츠", "나이스페이", "다날", "발신전용", "이지페이"
+    )
+
+    data class LineItem(
+        val name: String,
+        val qty: Int,
+        val price: Long
+    )
+
+    data class ParsedPayment(
+        val type: String,
+        val category: String,
+        val merchant: String,
+        val fromAccount: String,
+        val toAccount: String,
+        val balanceInfo: String,
+        val itemSummary: String,
+        val totalQuantity: String,
+        val amount: Long,
+        val cleanRawText: String,
+        val itemsJson: String,
+        val parsedTimestamp: Long?
+    )
+
+    fun containsPaymentKeyword(text: String): Boolean {
+        return KEYWORDS.any { text.contains(it) }
+    }
+
+    private fun stripBoilerplate(raw: String): String {
+        val cutMarkers = listOf(
+            "채무 지급보증 서비스",
+            "상품의 교환/반품 안내",
+            "교환/반품 불가 사유",
+            "청약철회의 효력",
+            "소비자 피해보상",
+            "결제하신 물품에 대한",
+            "본 메일은 발신전용",
+            "본 메일은 발신 전용",
+            "발신 전용으로 회신되지",
+            "상점정보 : 상점 바로가기",
+            "상점정보: 상점 바로가기",
+            "상점 바로가기",
+            "사업자등록번호",
+            "통신판매업신고",
+            "Play 포인트 적립",
+            "포인트 내역에서 사용 가능한",
+            "문의사항이 있는 경우",
+            "Google Play 고객센터",
+            "구독 취소 및 환불 정책",
+            "이용약관",
+            "개인정보처리방침",
+            "고객센터 이용안내",
+            "전자금융거래"
+        )
+        var cutIndex = raw.length
+        for (marker in cutMarkers) {
+            val idx = raw.indexOf(marker)
+            if (idx in 15 until cutIndex) {
+                cutIndex = idx
+            }
+        }
+        var trimmed = raw.substring(0, cutIndex).trim()
+
+        val promoStart = trimmed.indexOf("다양한 와우 혜택을 이용해보세요")
+        val promoEnd = trimmed.indexOf("월회비 결제 정보")
+        if (promoStart > 0 && promoEnd > promoStart) {
+            trimmed = (trimmed.substring(0, promoStart).trim() + "\n" + trimmed.substring(promoEnd).trim()).trim()
+        }
+
+        return trimmed
+    }
+
+    private fun deduplicateLines(text: String): String {
+        val seen = LinkedHashSet<String>()
+        val noiseExact = setOf(
+            "결제정보 : English Receipt 영수증 출력",
+            "English Receipt 영수증 출력",
+            "상품보기",
+            "바로가기",
+            "."
+        )
+        for (rawLine in text.split("\n")) {
+            var cleaned = rawLine.replace(Regex("^[0-9\\-]{8,14}\\s*[:：]\\s*"), "").trim()
+            if (cleaned.isEmpty() || noiseExact.contains(cleaned)) continue
+
+            val halfMatch = Regex("^(.{4,30})\\s+\\1$").find(cleaned)
+            if (halfMatch != null) {
+                cleaned = halfMatch.groupValues[1].trim()
+            }
+            seen.add(cleaned)
+        }
+        return seen.joinToString("\n")
+    }
+
+    private fun extractActualPaymentTimestamp(text: String): Long? {
+        val dtRegex = Regex("(?:결제일시|승인일시|거래일시)\\s*[:：]?\\s*(20[0-9]{2})[./-]([0-9]{1,2})[./-]([0-9]{1,2})\\s+([0-9]{1,2}):([0-9]{2})")
+        val inlineDtRegex = Regex("(20[0-9]{2})[./-]([0-9]{1,2})[./-]([0-9]{1,2})\\s+([0-9]{1,2}):([0-9]{2})에\\s*(?:결제|승인)")
+        val m = dtRegex.find(text) ?: inlineDtRegex.find(text)
+        if (m != null) {
+            return try {
+                val y = m.groupValues[1].toInt()
+                val mon = m.groupValues[2].toInt() - 1
+                val d = m.groupValues[3].toInt()
+                val h = m.groupValues[4].toInt()
+                val min = m.groupValues[5].toInt()
+                Calendar.getInstance().apply {
+                    set(y, mon, d, h, min, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        val gpDtRegex = Regex(
+            "주문\\s*날짜\\s*[:：]?\\s*(20[0-9]{2})[./-]\\s*([0-9]{1,2})[./-]\\s*([0-9]{1,2})[.\\s]+(오전|오후)?\\s*([0-9]{1,2})\\s*(?:시|:)\\s*([0-9]{1,2})\\s*분?"
+        )
+        val gm = gpDtRegex.find(text)
+        if (gm != null) {
+            return try {
+                val y = gm.groupValues[1].toInt()
+                val mon = gm.groupValues[2].toInt() - 1
+                val d = gm.groupValues[3].toInt()
+                val ampm = gm.groupValues[4]
+                val rawH = gm.groupValues[5].toInt()
+                val min = gm.groupValues[6].toInt()
+                val h = when {
+                    ampm == "오후" && rawH < 12 -> rawH + 12
+                    ampm == "오전" && rawH == 12 -> 0
+                    else -> rawH
+                }
+                Calendar.getInstance().apply {
+                    set(y, mon, d, h, min, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        return null
+    }
+
+    fun parse(title: String, body: String, fullText: String, rules: List<AutoRule> = emptyList()): ParsedPayment? {
+        val deduped = deduplicateLines(fullText)
+        val cleanBody = stripBoilerplate(deduped)
+
+        val deleteRule = rules.firstOrNull {
+            it.action == "delete" && it.keyword.isNotBlank() && cleanBody.contains(it.keyword, ignoreCase = true)
+        }
+        if (deleteRule != null) return null
+
+        if (!containsPaymentKeyword(cleanBody)) return null
+
+        val actualTimestamp = extractActualPaymentTimestamp(cleanBody)
+
+        val withoutBalance = cleanBody.replace(Regex("잔액\\s*[:：]?\\s*[0-9,]+\\s*원?"), "")
+        val totalAmtRegex = Regex(
+            "(?:총\\s*결제\\s*금액|실\\s*결제\\s*금액|최종\\s*결제\\s*금액|총\\s*주문\\s*금액|결제\\s*금액|승인\\s*금액|출금\\s*금액|입금\\s*금액|이체\\s*금액|합계\\s*금액|상품\\s*금액|총액|합계)\\s*[:：]?\\s*(?:(?:₩|KRW)\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})|([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\\s*원)"
+        )
+        val bankTxnAmtRegex = Regex(
+            "(?:출금|입금|이체|송금)\\s*[:：]?\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\\s*원"
+        )
+        val cardAmtRegex = Regex(
+            "(?:카드|일시불|할부|페이)\\s*(?:\\([^)]*\\))?\\s*[:：/]\\s*(?:₩|KRW)?\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\\s*원?"
+        )
+        val fallbackAmtRegex = Regex("([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\\s*원|(?:₩|KRW)\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})")
+
+        val rawNum = totalAmtRegex.find(withoutBalance)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
+            ?: bankTxnAmtRegex.find(withoutBalance)?.groupValues?.get(1)
+            ?: cardAmtRegex.find(withoutBalance)?.groupValues?.get(1)
+            ?: fallbackAmtRegex.find(withoutBalance)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
+            ?: return null
+
+        val amount = rawNum.replace(",", "").toLongOrNull() ?: return null
+        if (amount <= 0L) return null
+
+        val balanceMatch = Regex("잔액\\s*[:：]?\\s*([0-9,]+)\\s*원?").find(cleanBody)
+        val balanceInfo = if (balanceMatch != null) "잔액 ${balanceMatch.groupValues[1]}원" else ""
+
+        var fromAccount = ""
+        var toAccount = ""
+        val detectedBank = BANK_NAMES.firstOrNull { cleanBody.contains(it) } ?: ""
+        val isCardApproval = cleanBody.contains("승인") || cleanBody.contains("카드") || cleanBody.contains("결제") || cleanBody.contains("Google Play")
+
+        if (detectedBank.isNotEmpty() && !isCardApproval) {
+            val afterAcctRegex = Regex("[0-9*]{2,6}-[0-9*]{2,6}-[0-9*]{2,6}(?:-[0-9*]{1,4})?\\s+([^\\n\\r]+?)(?=\\s*잔액|\\s*$|[\n\r])")
+            val afterTimeRegex = Regex("[0-9]{1,2}:[0-9]{2}\\s+([^\\n\\r]+?)(?=\\s*잔액|\\s*$|[\n\r])")
+            val counterparty = (afterAcctRegex.find(cleanBody)?.groupValues?.get(1)
+                ?: afterTimeRegex.find(cleanBody)?.groupValues?.get(1)
+                ?: "").replace(Regex("^[0-9*\\-\\s]+"), "").trim()
+
+            if (cleanBody.contains("출금") || cleanBody.contains("송금")) {
+                fromAccount = detectedBank
+                toAccount = counterparty
+            } else if (cleanBody.contains("입금")) {
+                toAccount = detectedBank
+                fromAccount = counterparty
+            }
+        } else {
+            val payOrg = Regex("결제\\s*기관[ \\t]*[:：][ \\t]*([^\\n\\r]+)").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val payMethodSameLine = Regex("결제\\s*(?:수단|방법)[ \\t]*[:：][ \\t]*([^\\n\\r]+)").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val payMethodNextLine = if (payMethodSameLine.isEmpty()) {
+                Regex("결제\\s*(?:수단|방법)[ \\t]*[:：][ \\t]*\n+[ \\t]*([^\\n\\r]+)").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            } else ""
+            val payMethod = payMethodSameLine.ifEmpty { payMethodNextLine }
+
+            fromAccount = when {
+                payOrg.isNotEmpty() && payMethod.isNotEmpty() -> "$payOrg $payMethod"
+                payMethod.contains("/") -> payMethod.substringAfter("/").trim()
+                payMethod.isNotEmpty() -> payMethod
+                payOrg.isNotEmpty() -> payOrg
+                else -> ""
+            }
+        }
+
+        val matchedTransferRule = rules.firstOrNull {
+            it.action == "transfer" && it.keyword.isNotBlank() && cleanBody.contains(it.keyword, ignoreCase = true)
+        }
+        val matchedCategoryRule = rules.firstOrNull {
+            it.action == "category" && it.keyword.isNotBlank() && cleanBody.contains(it.keyword, ignoreCase = true)
+        }
+
+        val sanitizedForType = cleanBody
+            .replace("부분취소카드", "")
+            .replace(Regex("할인금액\\s*[:：]\\s*-[0-9,]+원"), "")
+
+        val isInternalTransfer = (matchedTransferRule != null && !isCardApproval)
+
+        val isIncome = !isInternalTransfer && (
+            matchedCategoryRule?.category == "수입" ||
+            sanitizedForType.contains("결제취소") ||
+            sanitizedForType.contains("승인취소") ||
+            sanitizedForType.contains("주문취소") ||
+            sanitizedForType.contains("취소완료") ||
+            sanitizedForType.contains("환불완료") ||
+            sanitizedForType.contains("환불금액") ||
+            Regex("(?:입금|급여|용돈|이체입금|계좌입금)\\s*(?:완료|금액|[:：]|[0-9,]+원)").containsMatchIn(sanitizedForType)
+        )
+
+        val type = when {
+            isInternalTransfer || matchedCategoryRule?.category == "이체/계좌이동" -> "trn"
+            isIncome -> "inc"
+            else -> "exp"
+        }
+
+        val labeledMerchantRegex = Regex("(?:상호|구매상점명|가맹점명|상점명|사용처|결제처)\\s*[:：]\\s*([^\\n\\r]+)")
+        val labeledMerchant = labeledMerchantRegex.find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+        val bracketBrand = Regex("\\[([^\\]]+)]").findAll(title)
+            .map { it.groupValues[1].trim() }
+            .firstOrNull { tag -> GENERIC_TAGS.none { tag.equals(it, ignoreCase = true) || tag.contains(it, ignoreCase = true) } } ?: ""
+
+        val orderedAtMerchant = Regex("([가-힣a-zA-Z0-9()]{2,20})에서\\s*(?:\\[[^\\]]+\\]\\s*)?(?:주문하신|결제하신)")
+            .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+        val cleanTitle = title.replace(Regex("\\[.*?\\]"), "").trim()
+        val isPhoneNumberTitle = cleanTitle.matches(Regex("^[0-9\\-]{7,15}$"))
+        val isGenericTitle = cleanTitle.isEmpty() ||
+            isPhoneNumberTitle ||
+            cleanTitle.contains("주문하신 내역") ||
+            cleanTitle.contains("결제하신 내역") ||
+            cleanTitle.contains("결제 내역입니다") ||
+            PG_OR_GENERIC_NAMES.any { cleanTitle.contains(it, ignoreCase = true) }
+
+        val transferRouteTitle = if (type == "trn" && (fromAccount.isNotEmpty() || toAccount.isNotEmpty())) {
+            when {
+                fromAccount.isNotEmpty() && toAccount.isNotEmpty() -> "$fromAccount → $toAccount"
+                fromAccount.isNotEmpty() -> "$fromAccount 출금"
+                else -> "$toAccount 입금"
+            }
+        } else ""
+
+        val merchant = when {
+            transferRouteTitle.isNotEmpty() -> transferRouteTitle
+            labeledMerchant.isNotEmpty() -> labeledMerchant
+            title.contains("Google Play", ignoreCase = true) || cleanBody.contains("Google Play 주문 영수증") -> "Google Play"
+            bracketBrand.isNotEmpty() -> bracketBrand
+            orderedAtMerchant.isNotEmpty() -> orderedAtMerchant
+            !isGenericTitle -> cleanTitle
+            else -> {
+                val lines = cleanBody.replace(Regex("\\[.*?\\]"), "")
+                    .split("\n")
+                    .map { it.trim() }
+                    .filter { line ->
+                        line.isNotEmpty() &&
+                            !line.matches(Regex("^[0-9\\-]{7,15}$")) &&
+                            !line.contains("잔액") &&
+                            !line.contains("누적") &&
+                            !line.contains("안전하게 결제") &&
+                            !line.contains("확인해주세요") &&
+                            PG_OR_GENERIC_NAMES.none { pg -> line.equals(pg, ignoreCase = true) }
+                    }
+                (lines.firstOrNull { it.contains("페이") || it.contains("마트") || it.contains("스토어") || it.contains("점") }
+                    ?: lines.firstOrNull()
+                    ?: "거래 내역").take(26)
+            }
+        }
+
+        val lineItems = extractLineItems(cleanBody)
+        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
+        val itemsJsonArr = JSONArray()
+
+        val itemSummary: String
+        val totalQuantity: String
+
+        if (lineItems.isNotEmpty()) {
+            var sumQty = 0
+            val sb = StringBuilder()
+            for (li in lineItems) {
+                sumQty += li.qty
+                if (sb.isNotEmpty()) sb.append("\n")
+                sb.append("• ${li.name} (${li.qty}개) : ${nf.format(li.price)}원")
+
+                itemsJsonArr.put(JSONObject().apply {
+                    put("name", li.name)
+                    put("qty", li.qty)
+                    put("price", li.price)
+                })
+            }
+            itemSummary = sb.toString()
+            totalQuantity = if (lineItems.size >= 2) "총 ${sumQty}개" else "${sumQty}개"
+        } else {
+            val labeledItem = Regex("(?:주문상품명|상품명|품목명|품목)\\s*[:：]\\s*([^\\n\\r]+)")
+                .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val membershipItem = Regex("([가-힣a-zA-Z0-9\\s]+(?:월회비|멤버십))(?:\\s*결제내역)?")
+                .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val validPeriod = Regex("적용기간\\s*[:：]\\s*([^\\n\\r]+)")
+                .find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+            val resolvedItemName = labeledItem.ifEmpty { membershipItem }
+
+            if (resolvedItemName.isNotEmpty()) {
+                val periodSuffix = if (validPeriod.isNotEmpty()) " ($validPeriod)" else " (1개)"
+                itemSummary = "• $resolvedItemName$periodSuffix : ${nf.format(amount)}원"
+                totalQuantity = if (validPeriod.isNotEmpty()) "1개월" else "1개"
+            } else {
+                val safeLines = cleanBody.split("\n").filter { line ->
+                    !line.contains("사업자") && !line.contains("통신판매") &&
+                        !line.contains("승인번호") && !line.contains("연락처") && !line.contains("고객센터")
+                }
+                val safeBody = safeLines.joinToString("\n")
+                val totalCountMatch = Regex("(총[ \\t]*[0-9]{1,3}[ \\t]*(?:건|개|종))").find(safeBody)?.groupValues?.get(1)?.trim() ?: ""
+                val singleQtyMatch = Regex("(?<![0-9\\-])([1-9][0-9]{0,2}[ \\t]*(?:개|잔|건|박스|병|팩|매|세트|봉|통|권))(?!입)")
+                    .find(safeBody)?.groupValues?.get(1)?.trim() ?: ""
+
+                itemSummary = ""
+                totalQuantity = totalCountMatch.ifEmpty { singleQtyMatch }
+            }
+        }
+
+        val discountText = Regex("할인금액\\s*[:：]\\s*([^\\n\\r]+)").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+        val shippingText = Regex("배송비\\s*[:：]\\s*([^\\n\\r]+)").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+
+        val formattedRaw = buildString {
+            append("[거래 요약]\n")
+            if (type == "trn" && (fromAccount.isNotEmpty() || toAccount.isNotEmpty())) {
+                append("• 이동 경로: ${fromAccount.ifEmpty { "-" }} → ${toAccount.ifEmpty { "-" }}\n")
+            } else {
+                append("• 결제처: $merchant\n")
+                if (fromAccount.isNotEmpty()) {
+                    append("• 결제수단: $fromAccount\n")
+                }
+            }
+            append("• 거래 금액: ${nf.format(amount)}원")
+            if (balanceInfo.isNotEmpty()) append(" ($balanceInfo)")
+            if (discountText.isNotEmpty() || shippingText.isNotEmpty()) {
+                val extra = listOfNotNull(
+                    if (discountText.isNotEmpty()) "할인 $discountText" else null,
+                    if (shippingText.isNotEmpty()) "배송비 $shippingText" else null
+                ).joinToString(" / ")
+                append(" ($extra)")
+            }
+            append("\n")
+            if (itemSummary.isNotEmpty()) {
+                append("• 상세 품목별 금액:\n$itemSummary\n")
+            }
+            append("\n[원본 알림 내용]\n")
+            append(cleanBody)
+        }
+
+        val category = when {
+            type == "trn" -> "이체/계좌이동"
+            matchedCategoryRule != null -> matchedCategoryRule.category
+            type == "inc" -> "수입"
+            else -> classifyCategory("$merchant $itemSummary $cleanBody")
+        }
+
+        return ParsedPayment(
+            type = type,
+            category = category,
+            merchant = merchant.ifEmpty { "거래 내역" },
+            fromAccount = fromAccount,
+            toAccount = toAccount,
+            balanceInfo = balanceInfo,
+            itemSummary = itemSummary,
+            totalQuantity = totalQuantity,
+            amount = amount,
+            cleanRawText = formattedRaw,
+            itemsJson = itemsJsonArr.toString(),
+            parsedTimestamp = actualTimestamp
+        )
+    }
+
+    private fun extractLineItems(text: String): List<LineItem> {
+        val result = mutableListOf<LineItem>()
+        val lines = text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+
+        val tableRowRegex = Regex(
+            "^(.+?)\\s*:\\s*([0-9,]+)원\\s*:\\s*([0-9]+)\\s*:\\s*([0-9,]+)원(?:\\s*:.*)?$"
+        )
+        val simpleRowRegex = Regex(
+            "^(.+?)\\s*:\\s*(?:(?:₩|KRW)\\s*([0-9,]+)|([0-9,]+)\\s*원)(?:\\s*/\\s*(?:월|년|주|일))?$"
+        )
+        val inlineCurrencyRowRegex = Regex(
+            "^(.+?)\\s+(?:₩|KRW)\\s*([0-9,]+)(?:\\s*/\\s*(?:월|년|주|일))?$"
+        )
+
+        val skipLabels = listOf(
+            "상품 금액", "상품금액", "할인금액", "할인 금액", "배송비", "총 결제금액",
+            "결제금액", "실결제금액", "일시불", "할부", "카드", "승인금액", "포인트",
+            "쿠폰", "잔액", "배달비", "총액", "합계", "부가세", "세금", "VAT"
+        )
+
+        for (line in lines) {
+            if (line.startsWith("(") && line.endsWith(")")) continue
+
+            val mA = tableRowRegex.find(line)
+            if (mA != null) {
+                var rawName = mA.groupValues[1].trim()
+                val qty = mA.groupValues[3].toIntOrNull() ?: 1
+                val itemTotalPrice = mA.groupValues[4].replace(",", "").toLongOrNull() ?: 0L
+
+                rawName = rawName.replace(Regex("[,\\s]+${qty}개$"), "").trim()
+                if (rawName.isNotEmpty() && itemTotalPrice > 0L) {
+                    result.add(LineItem(rawName, qty, itemTotalPrice))
+                }
+                continue
+            }
+
+            val mB = simpleRowRegex.find(line)
+            if (mB != null) {
+                val labelPart = mB.groupValues[1].trim()
+                val rawPriceStr = mB.groupValues[2].ifEmpty { mB.groupValues[3] }
+                val pricePart = rawPriceStr.replace(",", "").toLongOrNull() ?: 0L
+                if (pricePart > 0L &&
+                    !labelPart.contains("/") &&
+                    skipLabels.none { labelPart.contains(it, ignoreCase = true) }
+                ) {
+                    val qtyInName = Regex("[,\\s]+([0-9]+)개$").find(labelPart)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    val cleanName = labelPart.replace(Regex("[,\\s]+[0-9]+개$"), "").trim()
+                    if (cleanName.length >= 2) {
+                        result.add(LineItem(cleanName, qtyInName, pricePart))
+                    }
+                }
+                continue
+            }
+
+            val mC = inlineCurrencyRowRegex.find(line)
+            if (mC != null) {
+                val labelPart = mC.groupValues[1].trim()
+                val pricePart = mC.groupValues[2].replace(",", "").toLongOrNull() ?: 0L
+                if (pricePart > 0L &&
+                    skipLabels.none { labelPart.contains(it, ignoreCase = true) }
+                ) {
+                    val qtyInName = Regex("[,\\s]+([0-9]+)개$").find(labelPart)?.groupValues?.get(1)?.toIntOrNull() ?: 1
+                    val cleanName = labelPart.replace(Regex("[,\\s]+[0-9]+개$"), "").trim()
+                    if (cleanName.length >= 2) {
+                        result.add(LineItem(cleanName, qtyInName, pricePart))
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private fun classifyCategory(text: String): String {
+        val rules = listOf(
+            "구독/통신" to listOf("월회비", "로켓와우", "와우 멤버십", "멤버십", "정기결제", "구독", "SKT", "KT", "LGU+", "통신요금", "넷플릭스", "유튜브", "티빙", "웨이브", "디즈니", "구글", "Google", "애플", "라프텔", "듀오링고"),
+            "카페/간식" to listOf("스타벅스", "투썸", "메가커피", "컴포즈", "빽다방", "이디야", "할리스", "폴바셋", "카페", "커피", "베이커리", "파리바게뜨", "뚜레쥬르", "베스킨", "하겐다즈", "아이스크림", "디저트"),
+            "식비" to listOf("배달의민족", "배민", "쿠팡이츠", "요기요", "맥도날드", "버거킹", "롯데리아", "식당", "김밥", "국밥", "치킨", "피자", "족발", "보쌈", "횟집", "고기", "한식", "중식", "일식", "분식", "편의점", "GS25", "CU", "세븐일레븐", "바나나"),
+            "교통/차량" to listOf("택시", "카카오T", "티머니", "버스", "지하철", "코레일", "SRT", "KTX", "대한항공", "아시아나", "주유", "GS칼텍스", "SK에너지", "S-OIL", "하이패스", "주차"),
+            "쇼핑/생활" to listOf("쿠팡", "네이버쇼핑", "11번가", "G마켓", "옥션", "SSG", "이마트", "홈플러스", "롯데마트", "다이소", "올리브영", "무신사", "마트", "마켓컬리"),
+            "의료/건강" to listOf("병원", "의원", "치과", "한의원", "약국", "안과", "피부과", "내과", "정형외과", "건강검진")
+        )
+
+        for ((cat, words) in rules) {
+            if (words.any { text.contains(it, ignoreCase = true) }) {
+                return cat
+            }
+        }
+        return "기타"
+    }
+}
+
+object LedgerStorage {
+    private const val PREF_NAME = "AutoLedgerPrefs"
+    private const val KEY_RECORDS = "records"
+    private const val KEY_DARK = "dark_mode"
+    private const val KEY_FONT_SCALE = "font_scale"
+    private const val KEY_HISTORY = "search_history"
+    private const val KEY_EMAIL_PROV = "email_provider"
+    private const val KEY_EMAIL_ADDR = "email_address"
+    private const val KEY_EMAIL_PASS = "email_password"
+    private const val KEY_EMAIL_PERIOD_START = "email_period_start"
+    private const val KEY_EMAIL_PERIOD_END = "email_period_end"
+    private const val KEY_AUTO_RULES = "auto_rules_v1"
+    private const val KEY_RULES_INIT = "auto_rules_initialized"
+
+    fun isDarkMode(context: Context): Boolean {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DARK, true)
+    }
+
+    fun setDarkMode(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_DARK, enabled).apply()
+    }
+
+    fun getFontScale(context: Context): Float {
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getFloat(KEY_FONT_SCALE, 1.0f)
+    }
+
+    fun setFontScale(context: Context, scale: Float) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_FONT_SCALE, scale).apply()
+    }
+
+    fun ensureDefaultEmailPeriod(context: Context) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_EMAIL_PERIOD_START)) {
+            val nowCal = Calendar.getInstance()
+            val endMs = Calendar.getInstance().apply {
+                set(nowCal.get(Calendar.YEAR), nowCal.get(Calendar.MONTH), nowCal.get(Calendar.DAY_OF_MONTH), 23, 59, 59)
+            }.timeInMillis
+            val startCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -6) }
+            val startMs = Calendar.getInstance().apply {
+                set(startCal.get(Calendar.YEAR), startCal.get(Calendar.MONTH), startCal.get(Calendar.DAY_OF_MONTH), 0, 0, 0)
+            }.timeInMillis
+            saveEmailPeriod(context, startMs, endMs)
+        }
+    }
+
+    fun saveEmailPeriod(context: Context, startMillis: Long, endMillis: Long) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_EMAIL_PERIOD_START, startMillis)
+            .putLong(KEY_EMAIL_PERIOD_END, endMillis)
+            .apply()
+    }
+
+    fun getEmailPeriodStart(context: Context): Long {
+        ensureDefaultEmailPeriod(context)
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_EMAIL_PERIOD_START, System.currentTimeMillis() - 6 * 86_400_000L)
+    }
+
+    fun getEmailPeriodEnd(context: Context): Long {
+        ensureDefaultEmailPeriod(context)
+        return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_EMAIL_PERIOD_END, System.currentTimeMillis())
+    }
+
+    fun getEmailPeriodLabel(context: Context): String {
+        val fmt = SimpleDateFormat("yyyy.MM.dd", Locale.KOREA)
+        return "${fmt.format(Date(getEmailPeriodStart(context)))} ~ ${fmt.format(Date(getEmailPeriodEnd(context)))}"
+    }
+
+    fun ensureDefaultRules(context: Context) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_RULES_INIT, false)) return
+        val defaults = listOf("이정현", "토뱅", "토스뱅크", "카뱅", "카카오뱅크", "내계좌")
+        val arr = JSONArray()
+        defaults.forEachIndexed { idx, kw ->
+            arr.put(JSONObject().apply {
+                put("id", "def_$idx")
+                put("keyword", kw)
+                put("action", "transfer")
+                put("category", "이체/계좌이동")
+            })
+        }
+        prefs.edit()
+            .putString(KEY_AUTO_RULES, arr.toString())
+            .putBoolean(KEY_RULES_INIT, true)
+            .apply()
+    }
+
+    fun getAutoRules(context: Context): List<AutoRule> {
+        ensureDefaultRules(context)
+        val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_AUTO_RULES, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                AutoRule(
+                    id = o.optString("id", i.toString()),
+                    keyword = o.optString("keyword", ""),
+                    action = o.optString("action", "category"),
+                    category = o.optString("category", "기타")
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addAutoRule(context: Context, keyword: String, action: String, category: String) {
+        val current = getAutoRules(context).toMutableList()
+        current.add(
+            0,
+            AutoRule(
+                id = System.currentTimeMillis().toString(),
+                keyword = keyword,
+                action = action,
+                category = category
+            )
+        )
+        saveAutoRules(context, current)
+    }
+
+    fun removeAutoRule(context: Context, id: String) {
+        val filtered = getAutoRules(context).filter { it.id != id }
+        saveAutoRules(context, filtered)
+    }
+
+    private fun saveAutoRules(context: Context, rules: List<AutoRule>) {
+        val arr = JSONArray()
+        for (r in rules) {
+            arr.put(JSONObject().apply {
+                put("id", r.id)
+                put("keyword", r.keyword)
+                put("action", r.action)
+                put("category", r.category)
+            })
+        }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_AUTO_RULES, arr.toString()).apply()
+    }
+
+    fun applyAutoRulesToExistingRecords(context: Context): Int {
+        val rules = getAutoRules(context)
+        if (rules.isEmpty()) return 0
+        val oldArr = getRecords(context)
+        val newArr = JSONArray()
+        var changedCount = 0
+
+        for (i in 0 until oldArr.length()) {
+            val obj = oldArr.getJSONObject(i)
+            val combined = "${obj.optString("merchant")} ${obj.optString("fromAccount")} ${obj.optString("toAccount")} ${obj.optString("item")} ${obj.optString("raw")}"
+
+            val delRule = rules.firstOrNull { it.action == "delete" && it.keyword.isNotBlank() && combined.contains(it.keyword, ignoreCase = true) }
+            if (delRule != null) {
+                changedCount++
+                continue
+            }
+
+            val trnRule = rules.firstOrNull { it.action == "transfer" && it.keyword.isNotBlank() && combined.contains(it.keyword, ignoreCase = true) }
+            if (trnRule != null && obj.optString("type") != "trn") {
+                obj.put("type", "trn")
+                obj.put("category", "이체/계좌이동")
+                changedCount++
+                newArr.put(obj)
+                continue
+            }
+
+            val catRule = rules.firstOrNull { it.action == "category" && it.keyword.isNotBlank() && combined.contains(it.keyword, ignoreCase = true) }
+            if (catRule != null && obj.optString("category") != catRule.category) {
+                obj.put("category", catRule.category)
+                if (catRule.category == "수입") obj.put("type", "inc")
+                else if (catRule.category == "이체/계좌이동") obj.put("type", "trn")
+                else if (obj.optString("type") == "inc") obj.put("type", "exp")
+                changedCount++
+            }
+            newArr.put(obj)
+        }
+        saveSorted(context, newArr)
+        return changedCount
+    }
+
+    fun exportBackupJson(context: Context): String {
+        val root = JSONObject()
+        root.put("app", "AutoLedger")
+        root.put("exportedAt", System.currentTimeMillis())
+        root.put("records", getRecords(context))
+        val rulesRaw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_AUTO_RULES, "[]") ?: "[]"
+        root.put("rules", JSONArray(rulesRaw))
+        return root.toString(2)
+    }
+
+    fun countRecordsInBackupJson(jsonStr: String): Int {
+        return try {
+            val trimmed = jsonStr.trim()
+            if (trimmed.startsWith("[")) {
+                JSONArray(trimmed).length()
+            } else {
+                val obj = JSONObject(trimmed)
+                obj.getJSONArray("records").length()
+            }
+        } catch (_: Exception) {
+            -1
+        }
+    }
+
+    fun importBackupJson(context: Context, jsonStr: String, overwrite: Boolean): Int {
+        val trimmed = jsonStr.trim()
+        val incomingRecords: JSONArray
+        var incomingRules: JSONArray? = null
+
+        if (trimmed.startsWith("[")) {
+            incomingRecords = JSONArray(trimmed)
+        } else {
+            val root = JSONObject(trimmed)
+            incomingRecords = root.getJSONArray("records")
+            if (root.has("rules")) {
+                incomingRules = root.optJSONArray("rules")
+            }
+        }
+
+        if (overwrite) {
+            saveSorted(context, incomingRecords)
+            if (incomingRules != null && incomingRules.length() > 0) {
+                context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_AUTO_RULES, incomingRules.toString()).apply()
+            }
+            return incomingRecords.length()
+        } else {
+            val existing = getRecords(context)
+            val existingIds = HashSet<String>()
+            val existingSignatures = HashSet<String>()
+
+            for (i in 0 until existing.length()) {
+                val e = existing.getJSONObject(i)
+                existingIds.add(e.optString("id"))
+                existingSignatures.add("${e.optLong("timestamp")}_${e.optLong("amount")}_${e.optString("merchant")}")
+            }
+
+            var addedCount = 0
+            for (i in 0 until incomingRecords.length()) {
+                val item = incomingRecords.getJSONObject(i)
+                val id = item.optString("id")
+                val sig = "${item.optLong("timestamp")}_${item.optLong("amount")}_${item.optString("merchant")}"
+                if ((id.isNotEmpty() && existingIds.contains(id)) || existingSignatures.contains(sig)) {
+                    continue
+                }
+                existing.put(item)
+                addedCount++
+            }
+            saveSorted(context, existing)
+            return addedCount
+        }
+    }
+
+    fun saveEmailConfig(context: Context, provider: String, address: String, password: String) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EMAIL_PROV, provider)
+            .putString(KEY_EMAIL_ADDR, address)
+            .putString(KEY_EMAIL_PASS, password)
+            .apply()
+    }
+
+    fun getEmailProvider(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_PROV, "gmail") ?: "gmail"
+
+    fun getEmailAddress(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_ADDR, "") ?: ""
+
+    fun getEmailPassword(context: Context): String =
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE).getString(KEY_EMAIL_PASS, "") ?: ""
+
+    fun getSearchHistory(context: Context): List<String> {
+        val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_HISTORY, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            List(arr.length()) { arr.getString(it) }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addSearchHistory(context: Context, word: String) {
+        val current = getSearchHistory(context).toMutableList()
+        current.remove(word)
+        current.add(0, word)
+        val trimmed = current.take(10)
+        val arr = JSONArray()
+        trimmed.forEach { arr.put(it) }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_HISTORY, arr.toString()).apply()
+    }
+
+    fun clearSearchHistory(context: Context) {
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_HISTORY, "[]").apply()
+    }
+
+    fun saveBitmapToFile(context: Context, bitmap: Bitmap): String {
+        return try {
+            val dir = File(context.filesDir, "receipt_images")
+            if (!dir.exists()) dir.mkdirs()
+            val file = File(dir, "img_${System.currentTimeMillis()}.png")
+            FileOutputStream(file).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 90, out)
+            }
+            file.absolutePath
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    fun getRecords(context: Context): JSONArray {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val str = prefs.getString(KEY_RECORDS, "[]") ?: "[]"
+        return try {
+            JSONArray(str)
+        } catch (_: Exception) {
+            JSONArray()
+        }
+    }
+
+    fun addManualRecordWithDate(
+        context: Context,
+        type: String,
+        category: String,
+        merchant: String,
+        fromAccount: String,
+        toAccount: String,
+        item: String,
+        quantity: String,
+        amount: Long,
+        dateStr: String,
+        timestamp: Long
+    ) {
+        val arr = getRecords(context)
+        val record = JSONObject().apply {
+            put("id", System.currentTimeMillis().toString())
+            put("timestamp", timestamp)
+            put("type", type)
+            put("category", category)
+            put("merchant", merchant)
+            put("fromAccount", fromAccount)
+            put("toAccount", toAccount)
+            put("balanceInfo", "")
+            put("item", item)
+            put("quantity", quantity)
+            put("amount", amount)
+            put("date", dateStr)
+            put("raw", "직접 입력 내역")
+            put("itemsJson", "[]")
+            put("imagePath", "")
+            put("auto", false)
+        }
+        arr.put(record)
+        saveSorted(context, arr)
+    }
+
+    fun addOrMergeRecord(
+        context: Context,
+        type: String,
+        category: String,
+        merchant: String,
+        fromAccount: String,
+        toAccount: String,
+        balanceInfo: String,
+        item: String,
+        quantity: String,
+        amount: Long,
+        raw: String,
+        itemsJson: String,
+        imagePath: String,
+        auto: Boolean,
+        customTimestamp: Long = System.currentTimeMillis()
+    ): Boolean {
+        val oldArr = getRecords(context)
+        val normNewMerchant = merchant.replace("(주)", "").replace(" ", "").lowercase(Locale.KOREA)
+
+        if (auto) {
+            for (i in 0 until oldArr.length()) {
+                val existing = oldArr.getJSONObject(i)
+                if (!existing.optBoolean("auto", false)) continue
+                val exTime = existing.optLong("timestamp", 0L)
+                val exAmt = existing.optLong("amount", 0L)
+                val exMerchant = existing.optString("merchant", "").replace("(주)", "").replace(" ", "").lowercase(Locale.KOREA)
+
+                val timeDiff = kotlin.math.abs(customTimestamp - exTime)
+                val sameMerchant = normNewMerchant == exMerchant ||
+                    normNewMerchant.contains(exMerchant) ||
+                    exMerchant.contains(normNewMerchant)
+
+                if (exAmt == amount && (timeDiff <= 300_000L || (timeDiff <= 43_200_000L && sameMerchant))) {
+                    val exRaw = existing.optString("raw", "")
+                    if (raw.length > exRaw.length) {
+                        existing.put("raw", raw)
+                        existing.put("type", type)
+                        if (item.isNotEmpty()) existing.put("item", item)
+                        if (quantity.isNotEmpty()) existing.put("quantity", quantity)
+                        if (merchant != "거래 내역") existing.put("merchant", merchant)
+                        if (fromAccount.isNotEmpty()) existing.put("fromAccount", fromAccount)
+                        if (toAccount.isNotEmpty()) existing.put("toAccount", toAccount)
+                        if (balanceInfo.isNotEmpty()) existing.put("balanceInfo", balanceInfo)
+                        if (category != "기타") existing.put("category", category)
+                        if (itemsJson != "[]") existing.put("itemsJson", itemsJson)
+                    }
+                    if (imagePath.isNotEmpty() && existing.optString("imagePath").isEmpty()) {
+                        existing.put("imagePath", imagePath)
+                    }
+                    saveSorted(context, oldArr)
+                    return false
+                }
+            }
+        }
+
+        val dateStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(customTimestamp))
+        val uniqueId = "${customTimestamp}_${System.nanoTime() % 10000}"
+
+        val record = JSONObject().apply {
+            put("id", uniqueId)
+            put("timestamp", customTimestamp)
+            put("type", type)
+            put("category", category)
+            put("merchant", merchant)
+            put("fromAccount", fromAccount)
+            put("toAccount", toAccount)
+            put("balanceInfo", balanceInfo)
+            put("item", item)
+            put("quantity", quantity)
+            put("amount", amount)
+            put("date", dateStr)
+            put("raw", raw)
+            put("itemsJson", itemsJson)
+            put("imagePath", imagePath)
+            put("auto", auto)
+        }
+        oldArr.put(record)
+        saveSorted(context, oldArr)
+        return true
+    }
+
+    fun splitRecordIntoItems(context: Context, recordObj: JSONObject, itemsArr: JSONArray) {
+        val targetId = recordObj.optString("id", "")
+        val type = recordObj.optString("type", "exp")
+        val category = recordObj.optString("category", "기타")
+        val merchant = recordObj.optString("merchant", "")
+        val fromAccount = recordObj.optString("fromAccount", "")
+        val toAccount = recordObj.optString("toAccount", "")
+        val dateStr = recordObj.optString("date", "")
+        val timestamp = recordObj.optLong("timestamp", System.currentTimeMillis())
+        val raw = recordObj.optString("raw", "")
+        val imagePath = recordObj.optString("imagePath", "")
+        val auto = recordObj.optBoolean("auto", true)
+
+        val oldArr = getRecords(context)
+        val newArr = JSONArray()
+
+        for (i in 0 until oldArr.length()) {
+            val cur = oldArr.getJSONObject(i)
+            if (cur.optString("id") == targetId) {
+                for (j in 0 until itemsArr.length()) {
+                    val itemObj = itemsArr.getJSONObject(j)
+                    val iName = itemObj.optString("name", "")
+                    val iQty = itemObj.optInt("qty", 1)
+                    val iPrice = itemObj.optLong("price", 0L)
+
+                    newArr.put(JSONObject().apply {
+                        put("id", "${timestamp}_${j}")
+                        put("timestamp", timestamp)
+                        put("type", type)
+                        put("category", category)
+                        put("merchant", "$merchant - $iName")
+                        put("fromAccount", fromAccount)
+                        put("toAccount", toAccount)
+                        put("balanceInfo", "")
+                        put("item", "• $iName (${iQty}개) : ${NumberFormat.getNumberInstance(Locale.KOREA).format(iPrice)}원")
+                        put("quantity", "${iQty}개")
+                        put("amount", iPrice)
+                        put("date", dateStr)
+                        put("raw", raw)
+                        put("itemsJson", "[]")
+                        put("imagePath", imagePath)
+                        put("auto", auto)
+                    })
+                }
+            } else {
+                newArr.put(cur)
+            }
+        }
+        saveSorted(context, newArr)
+    }
+
+    fun updateRecord(
+        context: Context,
+        id: String,
+        type: String,
+        category: String,
+        merchant: String,
+        fromAccount: String,
+        toAccount: String,
+        item: String,
+        quantity: String,
+        amount: Long,
+        raw: String,
+        imagePath: String,
+        dateStr: String,
+        timestamp: Long
+    ) {
+        val arr = getRecords(context)
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            if (obj.optString("id") == id) {
+                obj.put("type", type)
+                obj.put("category", category)
+                obj.put("merchant", merchant)
+                obj.put("fromAccount", fromAccount)
+                obj.put("toAccount", toAccount)
+                obj.put("item", item)
+                obj.put("quantity", quantity)
+                obj.put("amount", amount)
+                obj.put("raw", raw)
+                obj.put("imagePath", imagePath)
+                obj.put("date", dateStr)
+                obj.put("timestamp", timestamp)
+                break
+            }
+        }
+        saveSorted(context, arr)
+    }
+
+    fun deleteRecordById(context: Context, id: String) {
+        val oldArr = getRecords(context)
+        val newArr = JSONArray()
+        for (i in 0 until oldArr.length()) {
+            val obj = oldArr.getJSONObject(i)
+            if (obj.optString("id") != id) {
+                newArr.put(obj)
+            }
+        }
+        saveSorted(context, newArr)
+    }
+
+    fun clearAllRecords(context: Context) {
+        saveSorted(context, JSONArray())
+    }
+
+    private fun saveSorted(context: Context, arr: JSONArray) {
+        val list = mutableListOf<JSONObject>()
+        for (i in 0 until arr.length()) {
+            list.add(arr.getJSONObject(i))
+        }
+        list.sortByDescending { it.optLong("timestamp", 0L) }
+        val sortedArr = JSONArray()
+        list.forEach { sortedArr.put(it) }
+
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_RECORDS, sortedArr.toString()).apply()
+    }
+}
