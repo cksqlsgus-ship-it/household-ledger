@@ -909,7 +909,6 @@ class MainActivity : Activity() {
             }
         }
 
-        // 좌측 카테고리 목록 (글자 잘림 방지를 위해 폭 98dp 적용)
         val leftScroll = ScrollView(this).apply {
             setBackgroundColor(bgSidebar)
             layoutParams = LinearLayout.LayoutParams(dp(98), ViewGroup.LayoutParams.MATCH_PARENT)
@@ -1893,10 +1892,10 @@ class MainActivity : Activity() {
             }
         }
 
-        val merchantInput = makeInput("제목 / 결제처", "예: 쿠팡, 농협 → 토뱅이정현")
+        val merchantInput = makeInput("제목 / 결제처", "예: 쿠팡, Google Play, 농협 → 토뱅이정현")
         val fromInput = makeInput("보낸 곳 / 결제수단 (선택)", "예: 국민 신용카드, 농협")
         val toInput = makeInput("받는 곳 / 입금 계좌 (선택)", "예: 토뱅이정현")
-        val itemInput = makeInput("상세 품목 및 개별 금액 (선택)", "예: • 아메리카노 (2잔) : 9,000원", multiLine = true)
+        val itemInput = makeInput("상세 품목 및 개별 금액 (선택)", "예: • Google One (1개월) : 29,000원", multiLine = true)
         val qtyInput = makeInput("총 수량 (선택)", "예: 총 2개")
         val amountInput = makeInput("금액 (원)", "숫자만 입력", isNumber = true)
 
@@ -2921,7 +2920,10 @@ object NotificationParser {
         "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "이체/계좌이동", "수입", "기타"
     )
 
-    private val KEYWORDS = listOf("승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드", "영수증", "KRW", "주문", "송금", "월회비")
+    private val KEYWORDS = listOf(
+        "승인", "결제", "출금", "입금", "사용", "취소", "이체", "페이", "카드",
+        "영수증", "KRW", "₩", "주문", "송금", "월회비", "구독", "갱신"
+    )
 
     private val GENERIC_TAGS = listOf(
         "web발신", "국외발신", "국제발신", "광고", "알림", "발신전용",
@@ -2965,7 +2967,6 @@ object NotificationParser {
         return KEYWORDS.any { text.contains(it) }
     }
 
-    // 불필요한 하단 발신전용·사업자·약관 안내 및 중간 혜택 홍보 블록 제거
     private fun stripBoilerplate(raw: String): String {
         val cutMarkers = listOf(
             "채무 지급보증 서비스",
@@ -2982,6 +2983,8 @@ object NotificationParser {
             "상점 바로가기",
             "사업자등록번호",
             "통신판매업신고",
+            "Google Play 고객센터",
+            "구독 취소 및 환불 정책",
             "이용약관",
             "개인정보처리방침",
             "고객센터 이용안내",
@@ -2996,7 +2999,6 @@ object NotificationParser {
         }
         var trimmed = raw.substring(0, cutIndex).trim()
 
-        // 쿠팡 와우 멤버십 메일 중간의 혜택 홍보 영역 제거 (쿠팡이츠 배달비 0원 등으로 식비 오분류 방지)
         val promoStart = trimmed.indexOf("다양한 와우 혜택을 이용해보세요")
         val promoEnd = trimmed.indexOf("월회비 결제 정보")
         if (promoStart > 0 && promoEnd > promoStart) {
@@ -3006,7 +3008,6 @@ object NotificationParser {
         return trimmed
     }
 
-    // 중복된 줄 및 한 줄 안에 반복된 구문("이지페이 결제내역 이지페이 결제내역") 정리
     private fun deduplicateLines(text: String): String {
         val seen = LinkedHashSet<String>()
         val noiseExact = setOf(
@@ -3020,7 +3021,6 @@ object NotificationParser {
             var cleaned = rawLine.replace(Regex("""^[0-9\-]{8,14}\s*[:：]\s*"""), "").trim()
             if (cleaned.isEmpty() || noiseExact.contains(cleaned)) continue
 
-            // 동일 문구 2회 반복 축약 (예: "이지페이 결제내역 이지페이 결제내역")
             val halfMatch = Regex("""^(.{4,30})\s+\1$""").find(cleaned)
             if (halfMatch != null) {
                 cleaned = halfMatch.groupValues[1].trim()
@@ -3030,25 +3030,53 @@ object NotificationParser {
         return seen.joinToString("\n")
     }
 
-    // 영수증 본문의 실제 결제일시 추출 (예: 2026/11/24 21:36 또는 2026.11.24 21:36)
     private fun extractActualPaymentTimestamp(text: String): Long? {
+        // 일반 카드·PG 영수증 결제일시 (예: 2026/11/24 21:36)
         val dtRegex = Regex("""(?:결제일시|승인일시|거래일시)\s*[:：]?\s*(20[0-9]{2})[./-]([0-9]{1,2})[./-]([0-9]{1,2})\s+([0-9]{1,2}):([0-9]{2})""")
         val inlineDtRegex = Regex("""(20[0-9]{2})[./-]([0-9]{1,2})[./-]([0-9]{1,2})\s+([0-9]{1,2}):([0-9]{2})에\s*(?:결제|승인)""")
-        val m = dtRegex.find(text) ?: inlineDtRegex.find(text) ?: return null
-
-        return try {
-            val y = m.groupValues[1].toInt()
-            val mon = m.groupValues[2].toInt() - 1
-            val d = m.groupValues[3].toInt()
-            val h = m.groupValues[4].toInt()
-            val min = m.groupValues[5].toInt()
-            Calendar.getInstance().apply {
-                set(y, mon, d, h, min, 0)
-                set(Calendar.MILLISECOND, 0)
-            }.timeInMillis
-        } catch (_: Exception) {
-            null
+        val m = dtRegex.find(text) ?: inlineDtRegex.find(text)
+        if (m != null) {
+            return try {
+                val y = m.groupValues[1].toInt()
+                val mon = m.groupValues[2].toInt() - 1
+                val d = m.groupValues[3].toInt()
+                val h = m.groupValues[4].toInt()
+                val min = m.groupValues[5].toInt()
+                Calendar.getInstance().apply {
+                    set(y, mon, d, h, min, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } catch (_: Exception) {
+                null
+            }
         }
+
+        // Google Play 영수증 주문 날짜 (예: 주문 날짜: 2026. 11. 27. 오후 2:30)
+        val gpDtRegex = Regex("""주문\s*날짜\s*[:：]?\s*(20[0-9]{2})[./-]\s*([0-9]{1,2})[./-]\s*([0-9]{1,2})[.\s]+(오전|오후)?\s*([0-9]{1,2}):([0-9]{2})""")
+        val gm = gpDtRegex.find(text)
+        if (gm != null) {
+            return try {
+                val y = gm.groupValues[1].toInt()
+                val mon = gm.groupValues[2].toInt() - 1
+                val d = gm.groupValues[3].toInt()
+                val ampm = gm.groupValues[4]
+                val rawH = gm.groupValues[5].toInt()
+                val min = gm.groupValues[6].toInt()
+                val h = when {
+                    ampm == "오후" && rawH < 12 -> rawH + 12
+                    ampm == "오전" && rawH == 12 -> 0
+                    else -> rawH
+                }
+                Calendar.getInstance().apply {
+                    set(y, mon, d, h, min, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        return null
     }
 
     fun parse(title: String, body: String, fullText: String, rules: List<AutoRule> = emptyList()): ParsedPayment? {
@@ -3064,20 +3092,20 @@ object NotificationParser {
 
         val actualTimestamp = extractActualPaymentTimestamp(cleanBody)
 
-        // 1. 금액 추출
+        // 1. 금액 추출 (₩29,000, KRW 29,000, 29,000원 모두 지원)
         val withoutBalance = cleanBody.replace(Regex("""잔액\s*[:：]?\s*[0-9,]+\s*원?"""), "")
         val totalAmtRegex = Regex(
-            """(?:총\s*결제\s*금액|실\s*결제\s*금액|최종\s*결제\s*금액|총\s*주문\s*금액|결제\s*금액|승인\s*금액|출금\s*금액|입금\s*금액|이체\s*금액|합계\s*금액|상품\s*금액)\s*[:：]?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원"""
+            """(?:총\s*결제\s*금액|실\s*결제\s*금액|최종\s*결제\s*금액|총\s*주문\s*금액|결제\s*금액|승인\s*금액|출금\s*금액|입금\s*금액|이체\s*금액|합계\s*금액|상품\s*금액|총액|합계)\s*[:：]?\s*(?:(?:₩|KRW)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})|([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원)"""
         )
         val bankTxnAmtRegex = Regex(
             """(?:출금|입금|이체|송금)\s*[:：]?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원"""
         )
         val cardAmtRegex = Regex(
-            """(?:카드|일시불|할부|페이)\s*(?:\([^)]*\))?\s*[:：/]\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원"""
+            """(?:카드|일시불|할부|페이)\s*(?:\([^)]*\))?\s*[:：/]\s*(?:₩|KRW)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원?"""
         )
-        val fallbackAmtRegex = Regex("""([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원|KRW\s*([0-9,]+)""")
+        val fallbackAmtRegex = Regex("""([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})\s*원|(?:₩|KRW)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{2,})""")
 
-        val rawNum = totalAmtRegex.find(withoutBalance)?.groupValues?.get(1)
+        val rawNum = totalAmtRegex.find(withoutBalance)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
             ?: bankTxnAmtRegex.find(withoutBalance)?.groupValues?.get(1)
             ?: cardAmtRegex.find(withoutBalance)?.groupValues?.get(1)
             ?: fallbackAmtRegex.find(withoutBalance)?.let { it.groupValues[1].ifEmpty { it.groupValues[2] } }
@@ -3089,11 +3117,11 @@ object NotificationParser {
         val balanceMatch = Regex("""잔액\s*[:：]?\s*([0-9,]+)\s*원?""").find(cleanBody)
         val balanceInfo = if (balanceMatch != null) "잔액 ${balanceMatch.groupValues[1]}원" else ""
 
-        // 2. 출금 계좌 / 결제수단 추출
+        // 2. 출금 계좌 / 결제수단 추출 ('결제 수단' 띄어쓰기 포함 지원)
         var fromAccount = ""
         var toAccount = ""
         val detectedBank = BANK_NAMES.firstOrNull { cleanBody.contains(it) } ?: ""
-        val isCardApproval = cleanBody.contains("승인") || cleanBody.contains("카드") || cleanBody.contains("결제")
+        val isCardApproval = cleanBody.contains("승인") || cleanBody.contains("카드") || cleanBody.contains("결제") || cleanBody.contains("Google Play")
 
         if (detectedBank.isNotEmpty() && !isCardApproval) {
             val afterAcctRegex = Regex("""[0-9*]{2,6}-[0-9*]{2,6}-[0-9*]{2,6}(?:-[0-9*]{1,4})?\s+([^\n\r]+?)(?=\s*잔액|\s*$|[\n\r])""")
@@ -3110,9 +3138,8 @@ object NotificationParser {
                 fromAccount = counterparty
             }
         } else {
-            // 카드/간편결제 영수증의 결제기관 + 결제수단 추출 (예: "국민 신용카드", "와우 카드(KB)")
-            val payOrg = Regex("""결제기관\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
-            val payMethod = Regex("""결제수단\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val payOrg = Regex("""결제\s*기관\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
+            val payMethod = Regex("""결제\s*수단\s*[:：]\s*([^\n\r]+)""").find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
 
             fromAccount = when {
                 payOrg.isNotEmpty() && payMethod.isNotEmpty() -> "$payOrg $payMethod"
@@ -3154,7 +3181,7 @@ object NotificationParser {
             else -> "exp"
         }
 
-        // 4. 결제처(상점명) 추출 ([신용카드] 오인식 방지 + 상호 라벨 우선)
+        // 4. 결제처(상점명) 추출 (Google Play 영수증 깔끔하게 정리 포함)
         val labeledMerchantRegex = Regex("""(?:상호|구매상점명|가맹점명|상점명|사용처|결제처)\s*[:：]\s*([^\n\r]+)""")
         val labeledMerchant = labeledMerchantRegex.find(cleanBody)?.groupValues?.get(1)?.trim() ?: ""
 
@@ -3185,6 +3212,7 @@ object NotificationParser {
         val merchant = when {
             transferRouteTitle.isNotEmpty() -> transferRouteTitle
             labeledMerchant.isNotEmpty() -> labeledMerchant
+            title.contains("Google Play", ignoreCase = true) || cleanBody.contains("Google Play 주문 영수증") -> "Google Play"
             bracketBrand.isNotEmpty() -> bracketBrand
             orderedAtMerchant.isNotEmpty() -> orderedAtMerchant
             !isGenericTitle -> cleanTitle
@@ -3207,7 +3235,7 @@ object NotificationParser {
             }
         }
 
-        // 5. 상세 품목별 이름 · 수량 · 개별 결제금액 추출 (줄바꿈 넘어가는 오인식 차단)
+        // 5. 상세 품목 추출 (₩ 및 /월·/년 구독 항목 포함)
         val lineItems = extractLineItems(cleanBody)
         val nf = NumberFormat.getNumberInstance(Locale.KOREA)
         val itemsJsonArr = JSONArray()
@@ -3246,7 +3274,6 @@ object NotificationParser {
                 itemSummary = "• $resolvedItemName$periodSuffix : ${nf.format(amount)}원"
                 totalQuantity = if (validPeriod.isNotEmpty()) "1개월" else "1개"
             } else {
-                // 같은 줄([ \t]*) 안에서만 수량 검색 (줄바꿈 넘어가서 사업자번호+다음줄 글자 결합 방지)
                 val safeLines = cleanBody.split("\n").filter { line ->
                     !line.contains("사업자") && !line.contains("통신판매") &&
                         !line.contains("승인번호") && !line.contains("연락처") && !line.contains("고객센터")
@@ -3321,10 +3348,14 @@ object NotificationParser {
         val tableRowRegex = Regex(
             """^(.+?)\s*:\s*([0-9,]+)원\s*:\s*([0-9]+)\s*:\s*([0-9,]+)원(?:\s*:.*)?$"""
         )
-        val simpleRowRegex = Regex("""^(.+?)\s*:\s*([0-9,]+)원$""")
+        // "상품명 : 11,900원" 및 구글 구독 "항목명 : ₩29,000/월" 모두 인식
+        val simpleRowRegex = Regex(
+            """^(.+?)\s*:\s*(?:(?:₩|KRW)\s*([0-9,]+)|([0-9,]+)\s*원)(?:\s*/\s*(?:월|년|주|일))?$"""
+        )
         val skipLabels = listOf(
             "상품 금액", "상품금액", "할인금액", "할인 금액", "배송비", "총 결제금액",
-            "결제금액", "실결제금액", "일시불", "할부", "카드", "승인금액", "포인트", "쿠폰", "잔액", "배달비"
+            "결제금액", "실결제금액", "일시불", "할부", "카드", "승인금액", "포인트",
+            "쿠폰", "잔액", "배달비", "총액", "합계", "부가세", "세금"
         )
 
         for (line in lines) {
@@ -3344,7 +3375,8 @@ object NotificationParser {
             val mB = simpleRowRegex.find(line)
             if (mB != null) {
                 val labelPart = mB.groupValues[1].trim()
-                val pricePart = mB.groupValues[2].replace(",", "").toLongOrNull() ?: 0L
+                val rawPriceStr = mB.groupValues[2].ifEmpty { mB.groupValues[3] }
+                val pricePart = rawPriceStr.replace(",", "").toLongOrNull() ?: 0L
                 if (pricePart > 0L &&
                     !labelPart.contains("/") &&
                     skipLabels.none { labelPart.contains(it, ignoreCase = true) }
@@ -3360,10 +3392,9 @@ object NotificationParser {
         return result
     }
 
-    // 구독/통신을 식비보다 먼저 검사하여 와우 멤버십 등이 식비로 오분류되지 않도록 개선
     private fun classifyCategory(text: String): String {
         val rules = listOf(
-            "구독/통신" to listOf("월회비", "로켓와우", "와우 멤버십", "멤버십", "정기결제", "구독", "SKT", "KT", "LGU+", "통신요금", "넷플릭스", "유튜브", "티빙", "웨이브", "디즈니", "구글", "애플", "라프텔", "듀오링고"),
+            "구독/통신" to listOf("월회비", "로켓와우", "와우 멤버십", "멤버십", "정기결제", "구독", "SKT", "KT", "LGU+", "통신요금", "넷플릭스", "유튜브", "티빙", "웨이브", "디즈니", "구글", "Google", "애플", "라프텔", "듀오링고"),
             "카페/간식" to listOf("스타벅스", "투썸", "메가커피", "컴포즈", "빽다방", "이디야", "할리스", "폴바셋", "카페", "커피", "베이커리", "파리바게뜨", "뚜레쥬르", "베스킨", "하겐다즈", "아이스크림", "디저트"),
             "식비" to listOf("배달의민족", "배민", "쿠팡이츠", "요기요", "맥도날드", "버거킹", "롯데리아", "식당", "김밥", "국밥", "치킨", "피자", "족발", "보쌈", "횟집", "고기", "한식", "중식", "일식", "분식", "편의점", "GS25", "CU", "세븐일레븐", "바나나"),
             "교통/차량" to listOf("택시", "카카오T", "티머니", "버스", "지하철", "코레일", "SRT", "KTX", "대한항공", "아시아나", "주유", "GS칼텍스", "SK에너지", "S-OIL", "하이패스", "주차"),
@@ -3743,7 +3774,6 @@ object LedgerStorage {
         saveSorted(context, arr)
     }
 
-    // 중복 방지 강화: ±12시간 이내 동일 금액 + 동일 결제처(또는 카드 알림과 상세 영수증) 자동 병합
     fun addOrMergeRecord(
         context: Context,
         type: String,
