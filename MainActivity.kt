@@ -90,7 +90,7 @@ class MainActivity : Activity() {
     private var activeAnalysisRightScrollView: ScrollView? = null
 
     private val pieIncludedCategories = linkedSetOf(
-        "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "기타"
+        "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "고정 지출", "기타"
     )
 
     private var filterStartMillis: Long? = null
@@ -956,10 +956,17 @@ class MainActivity : Activity() {
             setPadding(dp(6), dp(6), dp(6), dp(16))
         }
 
+        val fixedItems = LedgerStorage.getFixedExpenses(this)
         val leftCategories = listOf("전체") + NotificationParser.CATEGORIES
         for (cat in leftCategories) {
             val isSelected = (cat == selectedAnalysisCategory)
-            val cnt = if (cat == "전체") periodRecords.size else (catCountInPeriod[cat] ?: 0)
+            val cnt = if (cat == "고정 지출") {
+                fixedItems.size
+            } else if (cat == "전체") {
+                periodRecords.size
+            } else {
+                catCountInPeriod[cat] ?: 0
+            }
 
             val catItem = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -990,7 +997,7 @@ class MainActivity : Activity() {
             })
 
             catItem.addView(TextView(this).apply {
-                text = "${cnt}건"
+                text = if (cat == "고정 지출") "${cnt}개" else "${cnt}건"
                 textSize = sp(10f)
                 gravity = Gravity.CENTER
                 setTextColor(if (isSelected) Color.parseColor("#FDE8E8") else textSecondary)
@@ -1012,6 +1019,26 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(6), dp(12), dp(24))
         }
 
+        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
+
+        if (selectedAnalysisCategory == "고정 지출") {
+            renderFixedExpensePanel(
+                isDark = isDark,
+                rightContent = rightContent,
+                bgCard = bgCard,
+                bgPill = bgPill,
+                textPrimary = textPrimary,
+                textSecondary = textSecondary,
+                expColor = expColor,
+                incColor = incColor,
+                nf = nf
+            )
+            rightScroll.addView(rightContent)
+            splitRoot.addView(rightScroll)
+            contentHost.addView(splitRoot)
+            return
+        }
+
         rightContent.addView(
             buildPeriodFilterCard(isDark, compact = true).apply {
                 layoutParams = LinearLayout.LayoutParams(
@@ -1021,7 +1048,6 @@ class MainActivity : Activity() {
             }
         )
 
-        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
         var selInc = 0L
         var selExp = 0L
         var selTrn = 0L
@@ -1241,6 +1267,332 @@ class MainActivity : Activity() {
         rightScroll.addView(rightContent)
         splitRoot.addView(rightScroll)
         contentHost.addView(splitRoot)
+    }
+
+    private fun renderFixedExpensePanel(
+        isDark: Boolean,
+        rightContent: LinearLayout,
+        bgCard: Int,
+        bgPill: Int,
+        textPrimary: Int,
+        textSecondary: Int,
+        expColor: Int,
+        incColor: Int,
+        nf: NumberFormat
+    ) {
+        val nowCal = Calendar.getInstance()
+        val curYear = nowCal.get(Calendar.YEAR)
+        val curMonth = nowCal.get(Calendar.MONTH)
+        val curDay = nowCal.get(Calendar.DAY_OF_MONTH)
+        val monthLabel = "${curYear}.${String.format(Locale.KOREA, "%02d", curMonth + 1)}"
+
+        val fixedList = LedgerStorage.getFixedExpenses(this)
+        val allRecords = LedgerStorage.getRecords(this)
+
+        val thisMonthExpRecords = mutableListOf<JSONObject>()
+        for (i in 0 until allRecords.length()) {
+            val r = allRecords.getJSONObject(i)
+            if (r.optString("type", "exp") != "exp") continue
+            val ts = getRecordTimestamp(r)
+            if (ts <= 0L) continue
+            val c = Calendar.getInstance().apply { timeInMillis = ts }
+            if (c.get(Calendar.YEAR) == curYear && c.get(Calendar.MONTH) == curMonth) {
+                thisMonthExpRecords.add(r)
+            }
+        }
+
+        var plannedTotal = 0L
+        var doneTotal = 0L
+        var remainingTotal = 0L
+
+        val statusPairs = fixedList.map { fe ->
+            val kw = fe.keyword.ifEmpty { fe.title }.lowercase(Locale.KOREA)
+            val matchedRecord = thisMonthExpRecords.firstOrNull { r ->
+                val m = r.optString("merchant", "").lowercase(Locale.KOREA)
+                val itm = r.optString("item", "").lowercase(Locale.KOREA)
+                val amt = r.optLong("amount", 0L)
+                (kw.isNotEmpty() && (m.contains(kw) || itm.contains(kw))) ||
+                    (kotlin.math.abs(amt - fe.amount) <= 1000L && m.contains(fe.title.take(2).lowercase(Locale.KOREA)))
+            }
+            val isDone = matchedRecord != null
+            val effectiveAmt = matchedRecord?.optLong("amount", fe.amount) ?: fe.amount
+            plannedTotal += fe.amount
+            if (isDone) {
+                doneTotal += effectiveAmt
+            } else {
+                remainingTotal += fe.amount
+            }
+            Triple(fe, isDone, effectiveAmt)
+        }
+
+        val summaryCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundBg(bgCard, 14)
+            setPadding(dp(12), dp(14), dp(12), dp(14))
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        }
+
+        summaryCard.addView(TextView(this).apply {
+            text = "$monthLabel 고정 지출 예정 합계"
+            setTextColor(textSecondary)
+            textSize = sp(11f)
+            gravity = Gravity.CENTER
+        })
+        summaryCard.addView(TextView(this).apply {
+            text = "${nf.format(plannedTotal)}원"
+            setTextColor(textPrimary)
+            textSize = sp(22f)
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(6))
+        })
+
+        val subRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        subRow.addView(TextView(this).apply {
+            text = "완료 ${nf.format(doneTotal)}원"
+            setTextColor(incColor)
+            textSize = sp(12f)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(8), 0, dp(8), 0)
+        })
+        subRow.addView(TextView(this).apply {
+            text = "남은 예정 ${nf.format(remainingTotal)}원"
+            setTextColor(expColor)
+            textSize = sp(12f)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(8), 0, dp(8), 0)
+        })
+        summaryCard.addView(subRow)
+
+        summaryCard.addView(TextView(this).apply {
+            text = "결제 전에는 장부에 자동 찍히지 않으며, 실제 결제 시 완료로 표시됩니다."
+            setTextColor(textSecondary)
+            textSize = sp(10.5f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, 0)
+        })
+        rightContent.addView(summaryCard)
+
+        val topBtnRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        }
+        topBtnRow.addView(makePillButton(isDark, "+ 고정비 추가", isActive = true) {
+            showAddFixedExpenseDialog()
+        })
+        rightContent.addView(topBtnRow)
+
+        if (statusPairs.isEmpty()) {
+            rightContent.addView(TextView(this).apply {
+                text = "등록된 고정 지출이 없습니다.\n'+ 고정비 추가'로 월세, 관리비, 구독료 등을 등록해 보세요."
+                setTextColor(textSecondary)
+                textSize = sp(12f)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(24), 0, dp(24))
+            })
+            return
+        }
+
+        for ((fe, isDone, effectiveAmt) in statusPairs) {
+            val dDiff = fe.payDay - curDay
+            val dDayLabel = when {
+                isDone -> "✓ 완료"
+                dDiff == 0 -> "오늘 결제일"
+                dDiff > 0 -> "예정 (D-$dDiff)"
+                else -> "지남 (${-dDiff}일)"
+            }
+            val badgeColor = when {
+                isDone -> incColor
+                dDiff <= 2 -> expColor
+                else -> textSecondary
+            }
+
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundBg(bgCard, 12)
+                setPadding(dp(11), dp(10), dp(11), dp(10))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(7) }
+            }
+
+            val topLine = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+            val infoCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            infoCol.addView(TextView(this).apply {
+                text = "[$dDayLabel] · 매월 ${fe.payDay}일"
+                setTextColor(badgeColor)
+                textSize = sp(10.5f)
+                setTypeface(null, Typeface.BOLD)
+            })
+
+            infoCol.addView(TextView(this).apply {
+                text = fe.title
+                setTextColor(textPrimary)
+                textSize = sp(14f)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(2), 0, 0)
+            })
+
+            val subMeta = if (fe.keyword.isNotEmpty() && fe.keyword != fe.title) {
+                "매칭어: ${fe.keyword}"
+            } else {
+                "예상 고정비"
+            }
+            infoCol.addView(TextView(this).apply {
+                text = subMeta
+                setTextColor(textSecondary)
+                textSize = sp(10.5f)
+            })
+            topLine.addView(infoCol)
+
+            topLine.addView(TextView(this).apply {
+                text = "${nf.format(effectiveAmt)}원"
+                setTextColor(if (isDone) incColor else expColor)
+                textSize = sp(14f)
+                setTypeface(null, Typeface.BOLD)
+            })
+            card.addView(topLine)
+
+            val btnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { topMargin = dp(8) }
+            }
+
+            if (!isDone) {
+                val recordNowBtn = TextView(this).apply {
+                    text = "장부에 기록"
+                    textSize = sp(11f)
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(Color.WHITE)
+                    background = roundBg(Color.parseColor("#B93844"), 12)
+                    setPadding(dp(10), dp(5), dp(10), dp(5))
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { rightMargin = dp(6) }
+                    setOnClickListener {
+                        val cal = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, curYear)
+                            set(Calendar.MONTH, curMonth)
+                            val maxD = getActualMaximum(Calendar.DAY_OF_MONTH)
+                            set(Calendar.DAY_OF_MONTH, fe.payDay.coerceIn(1, maxD))
+                        }
+                        val ts = cal.timeInMillis
+                        val dStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(ts))
+                        LedgerStorage.addManualRecordWithDate(
+                            context = this@MainActivity,
+                            type = "exp",
+                            category = "고정 지출",
+                            merchant = fe.title,
+                            fromAccount = "",
+                            toAccount = "",
+                            item = "• ${fe.title} (1건) : ${nf.format(fe.amount)}원",
+                            quantity = "1건",
+                            amount = fe.amount,
+                            dateStr = dStr,
+                            timestamp = ts
+                        )
+                        refreshUI()
+                        Toast.makeText(this@MainActivity, "\"${fe.title}\" 지출이 장부에 기록되었습니다.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                btnRow.addView(recordNowBtn)
+            }
+
+            val delFixedBtn = TextView(this).apply {
+                text = "삭제"
+                textSize = sp(11f)
+                setTextColor(textSecondary)
+                background = roundBg(bgPill, 12)
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                setOnClickListener {
+                    LedgerStorage.removeFixedExpense(this@MainActivity, fe.id)
+                    refreshUI()
+                }
+            }
+            btnRow.addView(delFixedBtn)
+            card.addView(btnRow)
+
+            rightContent.addView(card)
+        }
+    }
+
+    private fun showAddFixedExpenseDialog() {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        fun addField(label: String, hintStr: String, isNumber: Boolean = false): EditText {
+            box.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, dp(3))
+            })
+            return EditText(this).apply {
+                hint = hintStr
+                textSize = sp(14f)
+                if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
+                styleDialogEditText(this, isDark)
+                box.addView(this)
+            }
+        }
+
+        val titleEdit = addField("고정 지출 이름", "예: 월세, 관리비, 통신비, 유튜브")
+        val dayEdit = addField("매월 결제일 (1~31일)", "예: 25", isNumber = true)
+        val amtEdit = addField("예상 금액 (원)", "숫자만 입력", isNumber = true)
+        val kwEdit = addField("알림/메일 자동 매칭 단어 (선택)", "비워두면 이름 기준으로 자동 확인")
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("고정 지출 추가")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val title = titleEdit.text.toString().trim()
+                val day = (dayEdit.text.toString().trim().toIntOrNull() ?: 1).coerceIn(1, 31)
+                val amt = amtEdit.text.toString().trim().toLongOrNull() ?: 0L
+                val kw = kwEdit.text.toString().trim().ifEmpty { title }
+
+                if (title.isNotEmpty() && amt > 0L) {
+                    LedgerStorage.addFixedExpense(this, title, day, amt, kw)
+                    refreshUI()
+                } else {
+                    Toast.makeText(this, "항목 이름과 금액을 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun renderSettingsTab(isDark: Boolean, container: LinearLayout) {
@@ -2942,10 +3294,18 @@ data class AutoRule(
     val category: String
 )
 
+data class FixedExpenseItem(
+    val id: String,
+    val title: String,
+    val payDay: Int,
+    val amount: Long,
+    val keyword: String
+)
+
 object NotificationParser {
 
     val CATEGORIES = listOf(
-        "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "이체/계좌이동", "수입", "기타"
+        "식비", "카페/간식", "쇼핑/생활", "교통/차량", "구독/통신", "의료/건강", "고정 지출", "이체/계좌이동", "수입", "기타"
     )
 
     private val KEYWORDS = listOf(
@@ -3475,6 +3835,61 @@ object LedgerStorage {
     private const val KEY_EMAIL_PERIOD_END = "email_period_end"
     private const val KEY_AUTO_RULES = "auto_rules_v1"
     private const val KEY_RULES_INIT = "auto_rules_initialized"
+    private const val KEY_FIXED_EXPENSES = "fixed_expenses_v1"
+
+    fun getFixedExpenses(context: Context): List<FixedExpenseItem> {
+        val raw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_FIXED_EXPENSES, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            List(arr.length()) { i ->
+                val o = arr.getJSONObject(i)
+                FixedExpenseItem(
+                    id = o.optString("id", i.toString()),
+                    title = o.optString("title", ""),
+                    payDay = o.optInt("payDay", 1).coerceIn(1, 31),
+                    amount = o.optLong("amount", 0L),
+                    keyword = o.optString("keyword", "")
+                )
+            }.sortedBy { it.payDay }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun addFixedExpense(context: Context, title: String, payDay: Int, amount: Long, keyword: String) {
+        val current = getFixedExpenses(context).toMutableList()
+        current.add(
+            FixedExpenseItem(
+                id = System.currentTimeMillis().toString(),
+                title = title,
+                payDay = payDay.coerceIn(1, 31),
+                amount = amount,
+                keyword = keyword
+            )
+        )
+        saveFixedExpenses(context, current)
+    }
+
+    fun removeFixedExpense(context: Context, id: String) {
+        val filtered = getFixedExpenses(context).filter { it.id != id }
+        saveFixedExpenses(context, filtered)
+    }
+
+    private fun saveFixedExpenses(context: Context, items: List<FixedExpenseItem>) {
+        val arr = JSONArray()
+        for (it in items) {
+            arr.put(JSONObject().apply {
+                put("id", it.id)
+                put("title", it.title)
+                put("payDay", it.payDay)
+                put("amount", it.amount)
+                put("keyword", it.keyword)
+            })
+        }
+        context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .edit().putString(KEY_FIXED_EXPENSES, arr.toString()).apply()
+    }
 
     fun isDarkMode(context: Context): Boolean {
         return context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
@@ -3655,6 +4070,9 @@ object LedgerStorage {
         val rulesRaw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             .getString(KEY_AUTO_RULES, "[]") ?: "[]"
         root.put("rules", JSONArray(rulesRaw))
+        val fixedRaw = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_FIXED_EXPENSES, "[]") ?: "[]"
+        root.put("fixedExpenses", JSONArray(fixedRaw))
         return root.toString(2)
     }
 
@@ -3676,6 +4094,7 @@ object LedgerStorage {
         val trimmed = jsonStr.trim()
         val incomingRecords: JSONArray
         var incomingRules: JSONArray? = null
+        var incomingFixed: JSONArray? = null
 
         if (trimmed.startsWith("[")) {
             incomingRecords = JSONArray(trimmed)
@@ -3685,6 +4104,9 @@ object LedgerStorage {
             if (root.has("rules")) {
                 incomingRules = root.optJSONArray("rules")
             }
+            if (root.has("fixedExpenses")) {
+                incomingFixed = root.optJSONArray("fixedExpenses")
+            }
         }
 
         if (overwrite) {
@@ -3692,6 +4114,10 @@ object LedgerStorage {
             if (incomingRules != null && incomingRules.length() > 0) {
                 context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
                     .edit().putString(KEY_AUTO_RULES, incomingRules.toString()).apply()
+            }
+            if (incomingFixed != null) {
+                context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_FIXED_EXPENSES, incomingFixed.toString()).apply()
             }
             return incomingRecords.length()
         } else {
