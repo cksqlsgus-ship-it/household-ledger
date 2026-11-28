@@ -23,8 +23,17 @@ data class FixedExpenseItem(
 data class AutoRule(
     val id: String,
     val keyword: String,
-    val action: String,
+    val ignoreKeywords: String = "",
+    val action: String, // "pass", "ignore", "delete", "transfer", "category"
     val category: String
+)
+
+data class UnmatchedAlertItem(
+    val id: String,
+    val packageName: String,
+    val title: String,
+    val body: String,
+    val timestamp: Long
 )
 
 data class AccountItem(
@@ -54,15 +63,15 @@ data class ParserTemplate(
     val merchantValue: String = "",
     val merchantStart: String = "",
     val merchantEnd: String = "",
-    val fromAccountMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val fromAccountMode: String = "AUTO",
     val fromAccountValue: String = "",
     val fromAccountStart: String = "",
     val fromAccountEnd: String = "",
-    val toAccountMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val toAccountMode: String = "AUTO",
     val toAccountValue: String = "",
     val toAccountStart: String = "",
     val toAccountEnd: String = "",
-    val itemMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val itemMode: String = "AUTO",
     val itemValue: String = "",
     val itemStart: String = "",
     val itemEnd: String = "",
@@ -70,7 +79,7 @@ data class ParserTemplate(
     val amountValue: String = "",
     val amountStart: String = "",
     val amountEnd: String = "",
-    val quantityMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val quantityMode: String = "AUTO",
     val quantityValue: String = "",
     val quantityStart: String = "",
     val quantityEnd: String = ""
@@ -84,6 +93,7 @@ object LedgerStorage {
     private const val KEY_FONT_SCALE = "font_scale"
     private const val KEY_SEARCH_HISTORY = "search_history_json"
     private const val KEY_AUTO_RULES = "auto_rules_json"
+    private const val KEY_UNMATCHED_ALERTS = "unmatched_alerts_json"
     private const val KEY_FIXED_EXPENSES = "fixed_expenses_json"
     private const val KEY_ACCOUNTS = "accounts_json"
     private const val KEY_PARSER_TEMPLATES = "parser_templates_json"
@@ -109,6 +119,134 @@ object LedgerStorage {
     fun setFontScale(context: Context, scale: Float) {
         prefs(context).edit().putFloat(KEY_FONT_SCALE, scale).apply()
     }
+
+    // --- 미분류 / 보류 알림 저장소 ---
+
+    fun getUnmatchedAlerts(context: Context): List<UnmatchedAlertItem> {
+        val raw = prefs(context).getString(KEY_UNMATCHED_ALERTS, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<UnmatchedAlertItem>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                list.add(
+                    UnmatchedAlertItem(
+                        id = obj.optString("id", ""),
+                        packageName = obj.optString("packageName", ""),
+                        title = obj.optString("title", ""),
+                        body = obj.optString("body", ""),
+                        timestamp = obj.optLong("timestamp", 0L)
+                    )
+                )
+            }
+            list.sortedByDescending { it.timestamp }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveUnmatchedAlerts(context: Context, items: List<UnmatchedAlertItem>) {
+        val arr = JSONArray()
+        for (item in items.take(150)) {
+            arr.put(
+                JSONObject().apply {
+                    put("id", item.id)
+                    put("packageName", item.packageName)
+                    put("title", item.title)
+                    put("body", item.body)
+                    put("timestamp", item.timestamp)
+                }
+            )
+        }
+        prefs(context).edit().putString(KEY_UNMATCHED_ALERTS, arr.toString()).apply()
+    }
+
+    fun addUnmatchedAlert(
+        context: Context,
+        packageName: String,
+        title: String,
+        body: String,
+        timestamp: Long
+    ) {
+        val current = getUnmatchedAlerts(context).toMutableList()
+        val isDup = current.any {
+            it.title == title && it.body == body && kotlin.math.abs(it.timestamp - timestamp) < 5000L
+        }
+        if (isDup) return
+
+        current.add(
+            0,
+            UnmatchedAlertItem(
+                id = "${timestamp}_${(100..999).random()}",
+                packageName = packageName,
+                title = title,
+                body = body,
+                timestamp = timestamp
+            )
+        )
+        saveUnmatchedAlerts(context, current)
+    }
+
+    fun removeUnmatchedAlert(context: Context, id: String) {
+        val updated = getUnmatchedAlerts(context).filterNot { it.id == id }
+        saveUnmatchedAlerts(context, updated)
+    }
+
+    fun clearUnmatchedAlerts(context: Context) {
+        saveUnmatchedAlerts(context, emptyList())
+    }
+
+    fun reprocessUnmatchedAlerts(context: Context): Pair<Int, Int> {
+        val current = getUnmatchedAlerts(context)
+        if (current.isEmpty()) return 0 to 0
+
+        val remaining = mutableListOf<UnmatchedAlertItem>()
+        var promotedCount = 0
+        var ignoredCount = 0
+
+        for (item in current) {
+            val combined = listOf(item.title, item.body).filter { it.isNotBlank() }.joinToString("\n")
+            val decision = NotificationParser.evaluateFilterDecision(context, combined)
+            when (decision) {
+                FilterDecision.IGNORE -> {
+                    ignoredCount++
+                }
+                FilterDecision.PASS -> {
+                    val parsed = NotificationParser.parse(context, item.title, item.body)
+                    if (parsed.shouldSave && parsed.amount > 0L) {
+                        addOrMergeRecord(
+                            context = context,
+                            type = parsed.type,
+                            category = parsed.category,
+                            merchant = parsed.merchant,
+                            fromAccount = parsed.fromAccount,
+                            toAccount = parsed.toAccount,
+                            balanceInfo = parsed.balanceInfo,
+                            item = parsed.itemSummary,
+                            quantity = parsed.totalQuantity,
+                            amount = parsed.amount,
+                            raw = parsed.cleanRawText,
+                            itemsJson = parsed.itemsJson,
+                            imagePath = "",
+                            auto = true,
+                            customTimestamp = if (item.timestamp > 0L) item.timestamp else System.currentTimeMillis()
+                        )
+                        promotedCount++
+                    } else {
+                        remaining.add(item)
+                    }
+                }
+                FilterDecision.UNMATCHED -> {
+                    remaining.add(item)
+                }
+            }
+        }
+
+        saveUnmatchedAlerts(context, remaining)
+        return promotedCount to ignoredCount
+    }
+
+    // --- 양식 규칙 (ParserTemplate) ---
 
     fun getParserTemplates(context: Context): List<ParserTemplate> {
         val raw = prefs(context).getString(KEY_PARSER_TEMPLATES, "[]") ?: "[]"
@@ -221,6 +359,8 @@ object LedgerStorage {
         val updated = getParserTemplates(context).filterNot { it.id == id }
         saveParserTemplates(context, updated)
     }
+
+    // --- 계좌 관리 ---
 
     fun getAccounts(context: Context): List<AccountItem> {
         val raw = prefs(context).getString(KEY_ACCOUNTS, "[]") ?: "[]"
@@ -395,6 +535,8 @@ object LedgerStorage {
             matchedRecords = matched
         )
     }
+
+    // --- 내역 저장/조회 ---
 
     fun getRecords(context: Context): JSONArray {
         val raw = prefs(context).getString(KEY_RECORDS, "[]") ?: "[]"
@@ -630,6 +772,8 @@ object LedgerStorage {
         saveRecords(context, updated)
     }
 
+    // --- 고정 지출 ---
+
     fun getFixedExpenses(context: Context): List<FixedExpenseItem> {
         val raw = prefs(context).getString(KEY_FIXED_EXPENSES, "[]") ?: "[]"
         return try {
@@ -726,6 +870,8 @@ object LedgerStorage {
         saveFixedExpenses(context, updated)
     }
 
+    // --- 단어 자동 분류 · 통과 · 무시 규칙 (AutoRule) ---
+
     fun getAutoRules(context: Context): List<AutoRule> {
         val raw = prefs(context).getString(KEY_AUTO_RULES, "[]") ?: "[]"
         return try {
@@ -737,6 +883,7 @@ object LedgerStorage {
                     AutoRule(
                         id = obj.optString("id", ""),
                         keyword = obj.optString("keyword", ""),
+                        ignoreKeywords = obj.optString("ignoreKeywords", ""),
                         action = obj.optString("action", "category"),
                         category = obj.optString("category", "기타")
                     )
@@ -755,6 +902,7 @@ object LedgerStorage {
                 JSONObject().apply {
                     put("id", rule.id)
                     put("keyword", rule.keyword)
+                    put("ignoreKeywords", rule.ignoreKeywords)
                     put("action", rule.action)
                     put("category", rule.category)
                 }
@@ -769,23 +917,62 @@ object LedgerStorage {
         saveAutoRules(
             context,
             listOf(
-                AutoRule("default_ad", "광고", "delete", "기타"),
-                AutoRule("default_me", "이정현", "transfer", "이체/계좌이동")
+                AutoRule("default_ad", "", "광고, 쿠폰, 이벤트, 포인트 적립", "ignore", "기타"),
+                AutoRule("default_pass_pay", "승인, 결제, 입금, 출금, 이체, USD, ₩", "광고, 쿠폰, 무료체험", "pass", "기타"),
+                AutoRule("default_me", "이정현", "", "transfer", "이체/계좌이동")
             )
         )
     }
 
-    fun addAutoRule(context: Context, keyword: String, action: String, category: String) {
+    fun addAutoRule(
+        context: Context,
+        keyword: String,
+        ignoreKeywords: String,
+        action: String,
+        category: String
+    ) {
+        val cleanKw = keyword.trim()
+        val cleanIgnore = ignoreKeywords.trim()
+        if (cleanKw.isEmpty() && cleanIgnore.isEmpty()) return
+
         val current = getAutoRules(context).toMutableList()
         current.add(
             AutoRule(
                 id = "${System.currentTimeMillis()}_${(100..999).random()}",
-                keyword = keyword.trim(),
+                keyword = cleanKw,
+                ignoreKeywords = cleanIgnore,
                 action = action,
                 category = category
             )
         )
         saveAutoRules(context, current)
+    }
+
+    fun updateAutoRule(
+        context: Context,
+        id: String,
+        keyword: String,
+        ignoreKeywords: String,
+        action: String,
+        category: String
+    ) {
+        val cleanKw = keyword.trim()
+        val cleanIgnore = ignoreKeywords.trim()
+        if (cleanKw.isEmpty() && cleanIgnore.isEmpty()) return
+
+        val updated = getAutoRules(context).map { r ->
+            if (r.id == id) {
+                r.copy(
+                    keyword = cleanKw,
+                    ignoreKeywords = cleanIgnore,
+                    action = action,
+                    category = category
+                )
+            } else {
+                r
+            }
+        }
+        saveAutoRules(context, updated)
     }
 
     fun removeAutoRule(context: Context, id: String) {
@@ -805,9 +992,38 @@ object LedgerStorage {
             val hay = "${obj.optString("merchant", "")} ${obj.optString("fromAccount", "")} ${obj.optString("toAccount", "")} ${obj.optString("item", "")} ${obj.optString("raw", "")}"
                 .lowercase(Locale.KOREA)
 
+            // 1. 무시/삭제 단어 먼저 확인
+            val shouldDeleteOrIgnore = rules.any { r ->
+                val ignTokens = r.ignoreKeywords.split(",", "\n", "|")
+                    .map { it.trim().lowercase(Locale.KOREA) }
+                    .filter { it.isNotEmpty() }
+                val hasIgnoreToken = ignTokens.any { hay.contains(it) }
+
+                val delTokens = if (r.action == "delete" || r.action == "ignore") {
+                    r.keyword.split(",", "\n", "|")
+                        .map { it.trim().lowercase(Locale.KOREA) }
+                        .filter { it.isNotEmpty() }
+                } else {
+                    emptyList()
+                }
+                val hasDelToken = delTokens.any { hay.contains(it) }
+
+                hasIgnoreToken || hasDelToken
+            }
+
+            if (shouldDeleteOrIgnore) {
+                changedCount++
+                continue
+            }
+
+            // 2. 이체 / 카테고리 규칙 확인
             var matchedRule: AutoRule? = null
             for (r in rules) {
-                if (r.keyword.isNotEmpty() && hay.contains(r.keyword.lowercase(Locale.KOREA))) {
+                if (r.action != "transfer" && r.action != "category") continue
+                val kwTokens = r.keyword.split(",", "\n", "|")
+                    .map { it.trim().lowercase(Locale.KOREA) }
+                    .filter { it.isNotEmpty() }
+                if (kwTokens.any { hay.contains(it) }) {
                     matchedRule = r
                     break
                 }
@@ -819,9 +1035,6 @@ object LedgerStorage {
             }
 
             when (matchedRule.action) {
-                "delete" -> {
-                    changedCount++
-                }
                 "transfer" -> {
                     if (obj.optString("type", "") != "trn" || obj.optString("category", "") != "이체/계좌이동") {
                         obj.put("type", "trn")
@@ -830,13 +1043,14 @@ object LedgerStorage {
                     }
                     updated.put(obj)
                 }
-                else -> {
+                "category" -> {
                     if (obj.optString("category", "") != matchedRule.category) {
                         obj.put("category", matchedRule.category)
                         changedCount++
                     }
                     updated.put(obj)
                 }
+                else -> updated.put(obj)
             }
         }
 
@@ -845,6 +1059,8 @@ object LedgerStorage {
         }
         return changedCount
     }
+
+    // --- 검색 기록 / 이미지 / 이메일 설정 ---
 
     fun getSearchHistory(context: Context): List<String> {
         val raw = prefs(context).getString(KEY_SEARCH_HISTORY, "[]") ?: "[]"
