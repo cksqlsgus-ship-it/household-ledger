@@ -43,6 +43,39 @@ data class AccountFlowSummary(
     val matchedRecords: List<JSONObject>
 )
 
+data class ParserTemplate(
+    val id: String,
+    val name: String,
+    val includeWords: String = "",
+    val excludeWords: String = "",
+    val actionType: String = "exp", // "exp", "inc", "trn", "delete"
+    val category: String = "기타",
+    val merchantMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val merchantValue: String = "",
+    val merchantStart: String = "",
+    val merchantEnd: String = "",
+    val fromAccountMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val fromAccountValue: String = "",
+    val fromAccountStart: String = "",
+    val fromAccountEnd: String = "",
+    val toAccountMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val toAccountValue: String = "",
+    val toAccountStart: String = "",
+    val toAccountEnd: String = "",
+    val itemMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val itemValue: String = "",
+    val itemStart: String = "",
+    val itemEnd: String = "",
+    val amountMode: String = "FIRST", // "FIRST", "LAST", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val amountValue: String = "",
+    val amountStart: String = "",
+    val amountEnd: String = "",
+    val quantityMode: String = "AUTO", // "AUTO", "FIXED", "AFTER", "BEFORE", "BETWEEN"
+    val quantityValue: String = "",
+    val quantityStart: String = "",
+    val quantityEnd: String = ""
+)
+
 object LedgerStorage {
 
     private const val PREFS_NAME = "my_ledger_prefs"
@@ -53,6 +86,7 @@ object LedgerStorage {
     private const val KEY_AUTO_RULES = "auto_rules_json"
     private const val KEY_FIXED_EXPENSES = "fixed_expenses_json"
     private const val KEY_ACCOUNTS = "accounts_json"
+    private const val KEY_PARSER_TEMPLATES = "parser_templates_json"
     private const val KEY_EMAIL_PROVIDER = "email_provider"
     private const val KEY_EMAIL_ADDR = "email_addr"
     private const val KEY_EMAIL_PASS = "email_pass"
@@ -74,6 +108,118 @@ object LedgerStorage {
 
     fun setFontScale(context: Context, scale: Float) {
         prefs(context).edit().putFloat(KEY_FONT_SCALE, scale).apply()
+    }
+
+    fun getParserTemplates(context: Context): List<ParserTemplate> {
+        val raw = prefs(context).getString(KEY_PARSER_TEMPLATES, "[]") ?: "[]"
+        return try {
+            val arr = JSONArray(raw)
+            val list = mutableListOf<ParserTemplate>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                list.add(
+                    ParserTemplate(
+                        id = obj.optString("id", ""),
+                        name = obj.optString("name", ""),
+                        includeWords = obj.optString("includeWords", ""),
+                        excludeWords = obj.optString("excludeWords", ""),
+                        actionType = obj.optString("actionType", "exp"),
+                        category = obj.optString("category", "기타"),
+                        merchantMode = obj.optString("merchantMode", "AUTO"),
+                        merchantValue = obj.optString("merchantValue", ""),
+                        merchantStart = obj.optString("merchantStart", ""),
+                        merchantEnd = obj.optString("merchantEnd", ""),
+                        fromAccountMode = obj.optString("fromAccountMode", "AUTO"),
+                        fromAccountValue = obj.optString("fromAccountValue", ""),
+                        fromAccountStart = obj.optString("fromAccountStart", ""),
+                        fromAccountEnd = obj.optString("fromAccountEnd", ""),
+                        toAccountMode = obj.optString("toAccountMode", "AUTO"),
+                        toAccountValue = obj.optString("toAccountValue", ""),
+                        toAccountStart = obj.optString("toAccountStart", ""),
+                        toAccountEnd = obj.optString("toAccountEnd", ""),
+                        itemMode = obj.optString("itemMode", "AUTO"),
+                        itemValue = obj.optString("itemValue", ""),
+                        itemStart = obj.optString("itemStart", ""),
+                        itemEnd = obj.optString("itemEnd", ""),
+                        amountMode = obj.optString("amountMode", "FIRST"),
+                        amountValue = obj.optString("amountValue", ""),
+                        amountStart = obj.optString("amountStart", ""),
+                        amountEnd = obj.optString("amountEnd", ""),
+                        quantityMode = obj.optString("quantityMode", "AUTO"),
+                        quantityValue = obj.optString("quantityValue", ""),
+                        quantityStart = obj.optString("quantityStart", ""),
+                        quantityEnd = obj.optString("quantityEnd", "")
+                    )
+                )
+            }
+            list
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun saveParserTemplates(context: Context, templates: List<ParserTemplate>) {
+        val arr = JSONArray()
+        for (t in templates) {
+            arr.put(
+                JSONObject().apply {
+                    put("id", t.id)
+                    put("name", t.name)
+                    put("includeWords", t.includeWords)
+                    put("excludeWords", t.excludeWords)
+                    put("actionType", t.actionType)
+                    put("category", t.category)
+                    put("merchantMode", t.merchantMode)
+                    put("merchantValue", t.merchantValue)
+                    put("merchantStart", t.merchantStart)
+                    put("merchantEnd", t.merchantEnd)
+                    put("fromAccountMode", t.fromAccountMode)
+                    put("fromAccountValue", t.fromAccountValue)
+                    put("fromAccountStart", t.fromAccountStart)
+                    put("fromAccountEnd", t.fromAccountEnd)
+                    put("toAccountMode", t.toAccountMode)
+                    put("toAccountValue", t.toAccountValue)
+                    put("toAccountStart", t.toAccountStart)
+                    put("toAccountEnd", t.toAccountEnd)
+                    put("itemMode", t.itemMode)
+                    put("itemValue", t.itemValue)
+                    put("itemStart", t.itemStart)
+                    put("itemEnd", t.itemEnd)
+                    put("amountMode", t.amountMode)
+                    put("amountValue", t.amountValue)
+                    put("amountStart", t.amountStart)
+                    put("amountEnd", t.amountEnd)
+                    put("quantityMode", t.quantityMode)
+                    put("quantityValue", t.quantityValue)
+                    put("quantityStart", t.quantityStart)
+                    put("quantityEnd", t.quantityEnd)
+                }
+            )
+        }
+        prefs(context).edit().putString(KEY_PARSER_TEMPLATES, arr.toString()).apply()
+    }
+
+    fun addParserTemplate(context: Context, template: ParserTemplate) {
+        val cleanName = template.name.trim()
+        if (cleanName.isEmpty()) return
+        val current = getParserTemplates(context).toMutableList()
+        val id = if (template.id.isNotBlank()) template.id else "${System.currentTimeMillis()}_${(100..999).random()}"
+        current.add(template.copy(id = id, name = cleanName))
+        saveParserTemplates(context, current)
+    }
+
+    fun updateParserTemplate(context: Context, template: ParserTemplate) {
+        val cleanName = template.name.trim()
+        if (cleanName.isEmpty()) return
+        val updated = getParserTemplates(context).map { item ->
+            if (item.id == template.id) template.copy(name = cleanName) else item
+        }
+        saveParserTemplates(context, updated)
+    }
+
+    fun removeParserTemplate(context: Context, id: String) {
+        val updated = getParserTemplates(context).filterNot { it.id == id }
+        saveParserTemplates(context, updated)
     }
 
     fun getAccounts(context: Context): List<AccountItem> {
