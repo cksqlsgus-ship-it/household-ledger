@@ -91,7 +91,7 @@ object EmailImapFetcher {
                         auto = true,
                         customTimestamp = recordTs
                     )
-                    if (inserted) importedCount++
+                    importedCount++
                 }
             }
 
