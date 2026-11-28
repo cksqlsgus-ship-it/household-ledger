@@ -13,7 +13,7 @@ class PaymentNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         sbn ?: return
         val pkg = sbn.packageName ?: return
-        if (pkg == packageName) return
+        if (pkg == packageName || pkg == "android" || pkg == "com.android.systemui") return
 
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
@@ -39,60 +39,64 @@ class PaymentNotificationListener : NotificationListenerService() {
         lastRawKey = dedupKey
         lastPostTimeMs = nowMs
 
-        if (!looksLikeFinancialNotification(combinedForCheck)) {
-            return
-        }
-
-        val parsed = NotificationParser.parse(this, title, body)
-        if (!parsed.shouldSave || parsed.amount <= 0L) {
-            return
-        }
-
         val eventTs = if (sbn.postTime > 0L) sbn.postTime else nowMs
+        val decision = NotificationParser.evaluateFilterDecision(this, combinedForCheck)
 
-        LedgerStorage.addOrMergeRecord(
-            context = this,
-            type = parsed.type,
-            category = parsed.category,
-            merchant = parsed.merchant,
-            fromAccount = parsed.fromAccount,
-            toAccount = parsed.toAccount,
-            balanceInfo = parsed.balanceInfo,
-            item = parsed.itemSummary,
-            quantity = parsed.totalQuantity,
-            amount = parsed.amount,
-            raw = parsed.cleanRawText,
-            itemsJson = parsed.itemsJson,
-            imagePath = "",
-            auto = true,
-            customTimestamp = eventTs
-        )
+        when (decision) {
+            FilterDecision.IGNORE -> {
+                return
+            }
+            FilterDecision.UNMATCHED -> {
+                LedgerStorage.addUnmatchedAlert(
+                    context = this,
+                    packageName = pkg,
+                    title = title,
+                    body = body,
+                    timestamp = eventTs
+                )
+                sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").apply {
+                    setPackage(packageName)
+                })
+                return
+            }
+            FilterDecision.PASS -> {
+                val parsed = NotificationParser.parse(this, title, body)
+                if (!parsed.shouldSave || parsed.amount <= 0L) {
+                    LedgerStorage.addUnmatchedAlert(
+                        context = this,
+                        packageName = pkg,
+                        title = title,
+                        body = body,
+                        timestamp = eventTs
+                    )
+                    sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").apply {
+                        setPackage(packageName)
+                    })
+                    return
+                }
 
-        sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").apply {
-            setPackage(packageName)
-        })
-    }
+                LedgerStorage.addOrMergeRecord(
+                    context = this,
+                    type = parsed.type,
+                    category = parsed.category,
+                    merchant = parsed.merchant,
+                    fromAccount = parsed.fromAccount,
+                    toAccount = parsed.toAccount,
+                    balanceInfo = parsed.balanceInfo,
+                    item = parsed.itemSummary,
+                    quantity = parsed.totalQuantity,
+                    amount = parsed.amount,
+                    raw = parsed.cleanRawText,
+                    itemsJson = parsed.itemsJson,
+                    imagePath = "",
+                    auto = true,
+                    customTimestamp = eventTs
+                )
 
-    private fun looksLikeFinancialNotification(text: String): Boolean {
-        val hasNumber = Regex("[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+").containsMatchIn(text)
-        if (!hasNumber) return false
-
-        val hasCurrencyOrAction = Regex("(원|₩|결제|승인|입금|출금|이체|환불|취소|구독|청구)").containsMatchIn(text)
-        if (hasCurrencyOrAction) return true
-
-        val templates = LedgerStorage.getParserTemplates(this)
-        if (templates.any { tpl ->
-                val tokens = tpl.includeWords.split(",", "\n", "|")
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-                tokens.isNotEmpty() && tokens.all { text.contains(it, ignoreCase = true) }
-            }) {
-            return true
-        }
-
-        val rules = LedgerStorage.getAutoRules(this)
-        return rules.any { r ->
-            r.keyword.isNotBlank() && text.contains(r.keyword, ignoreCase = true)
+                sendBroadcast(Intent("com.myledger.app.UPDATE_LEDGER").apply {
+                    setPackage(packageName)
+                })
+            }
         }
     }
 }
