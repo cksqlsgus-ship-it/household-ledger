@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var bottomNavBar: LinearLayout
 
     private var currentTab = "all"
+    private var selectedAccountId: String? = null
     private var selectedAnalysisCategory = "전체"
     private var currentQuery = ""
     private var isSearchExpanded = false
@@ -139,7 +140,10 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (currentTab != "all") {
+        if (currentTab == "accounts" && selectedAccountId != null) {
+            selectedAccountId = null
+            refreshUI()
+        } else if (currentTab != "all") {
             currentTab = "all"
             refreshUI()
         } else {
@@ -192,6 +196,16 @@ class MainActivity : Activity() {
                     scroll.post { scroll.scrollTo(0, restoreY) }
                 }
             }
+            "accounts" -> {
+                val scroll = ScrollView(this)
+                val container = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(16), dp(10), dp(16), dp(24))
+                }
+                renderAccountsTab(isDark, container)
+                scroll.addView(container)
+                contentHost.addView(scroll)
+            }
             "analysis" -> {
                 renderCombinedAnalysisTab(isDark)
                 val rightScroll = activeAnalysisRightScrollView
@@ -218,6 +232,7 @@ class MainActivity : Activity() {
 
         val tabs = listOf(
             Triple("all", "▤", "전체"),
+            Triple("accounts", "🏦", "계좌"),
             Triple("analysis", "◔", "분석"),
             Triple("settings", "⚙", "설정")
         )
@@ -235,7 +250,10 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 setPadding(dp(4), dp(2), dp(4), dp(2))
                 setOnClickListener {
-                    if (currentTab != tabKey) {
+                    if (tabKey == "accounts") {
+                        selectedAccountId = null
+                    }
+                    if (currentTab != tabKey || (tabKey == "accounts" && selectedAccountId != null)) {
                         currentTab = tabKey
                         refreshUI()
                     }
@@ -263,6 +281,523 @@ class MainActivity : Activity() {
 
             bottomNavBar.addView(tabItem)
         }
+    }
+
+    private fun renderAccountsTab(isDark: Boolean, container: LinearLayout) {
+        val bgCard = if (isDark) Color.parseColor("#1C1C1E") else Color.WHITE
+        val bgPill = if (isDark) Color.parseColor("#2C2C2E") else Color.parseColor("#E5E5EA")
+        val textPrimary = if (isDark) Color.parseColor("#F5F5F7") else Color.parseColor("#111827")
+        val textSecondary = if (isDark) Color.parseColor("#98989D") else Color.parseColor("#6B7280")
+        val incColor = if (isDark) Color.parseColor("#6495ED") else Color.parseColor("#2563EB")
+        val expColor = if (isDark) Color.parseColor("#E56B6F") else Color.parseColor("#C83E4D")
+        val trnColor = if (isDark) Color.parseColor("#A78BFA") else Color.parseColor("#7C3AED")
+        val nf = NumberFormat.getNumberInstance(Locale.KOREA)
+
+        val accounts = LedgerStorage.getAccounts(this)
+        val activeAccount = selectedAccountId?.let { id -> accounts.firstOrNull { it.id == id } }
+
+        if (activeAccount != null) {
+            renderAccountDetailScreen(
+                container = container,
+                account = activeAccount,
+                bgCard = bgCard,
+                bgPill = bgPill,
+                textPrimary = textPrimary,
+                textSecondary = textSecondary,
+                incColor = incColor,
+                expColor = expColor,
+                trnColor = trnColor,
+                nf = nf
+            )
+            return
+        }
+
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+        headerRow.addView(TextView(this).apply {
+            text = "계좌 목록 (${accounts.size}개)"
+            setTextColor(textPrimary)
+            textSize = sp(17f)
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        headerRow.addView(makePillButton(isDark, "+ 계좌 추가", isActive = true) {
+            showAddAccountDialog()
+        })
+        container.addView(headerRow)
+
+        if (accounts.isEmpty()) {
+            container.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundBg(bgCard, 16)
+                setPadding(dp(20), dp(28), dp(20), dp(28))
+                gravity = Gravity.CENTER
+                addView(TextView(this@MainActivity).apply {
+                    text = "등록된 통장/계좌가 없습니다."
+                    setTextColor(textPrimary)
+                    textSize = sp(15f)
+                    setTypeface(null, Typeface.BOLD)
+                    gravity = Gravity.CENTER
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = "월급 통장, 생활비 통장, 여가 통장, 고정지출 통장 등을 추가하고\n시작 잔액을 입력해 통장별 흐름을 관리해 보세요."
+                    setTextColor(textSecondary)
+                    textSize = sp(12f)
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(6), 0, 0)
+                })
+            })
+            return
+        }
+
+        val widthDp = (resources.displayMetrics.widthPixels / resources.displayMetrics.density).toInt()
+        val columns = if (widthDp >= 600) 2 else 1
+
+        var idx = 0
+        while (idx < accounts.size) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(10) }
+            }
+
+            for (col in 0 until columns) {
+                val accIndex = idx + col
+                if (accIndex < accounts.size) {
+                    val acc = accounts[accIndex]
+                    val summary = LedgerStorage.calculateAccountSummary(this, acc)
+                    val card = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        background = roundBg(bgCard, 16)
+                        setPadding(dp(16), dp(15), dp(16), dp(15))
+                        minimumHeight = dp(122)
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            if (columns > 1 && col == 0) rightMargin = dp(8)
+                        }
+                        setOnClickListener {
+                            selectedAccountId = acc.id
+                            refreshUI()
+                        }
+                    }
+
+                    val topMeta = if (acc.institution.isNotBlank()) "${acc.name} · ${acc.institution}" else acc.name
+                    card.addView(TextView(this).apply {
+                        text = topMeta
+                        setTextColor(textPrimary)
+                        textSize = sp(14f)
+                        setTypeface(null, Typeface.BOLD)
+                        isSingleLine = true
+                    })
+
+                    card.addView(TextView(this).apply {
+                        text = "${nf.format(summary.balance)}원"
+                        setTextColor(textPrimary)
+                        textSize = sp(21f)
+                        setTypeface(null, Typeface.BOLD)
+                        isSingleLine = true
+                        setPadding(0, dp(6), 0, dp(8))
+                    })
+
+                    val flowRow = LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                    }
+                    flowRow.addView(TextView(this).apply {
+                        text = "유입 +${nf.format(summary.inflow)}원"
+                        setTextColor(incColor)
+                        textSize = sp(11.5f)
+                        setTypeface(null, Typeface.BOLD)
+                        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    })
+                    flowRow.addView(TextView(this).apply {
+                        text = "유출 -${nf.format(summary.outflow)}원"
+                        setTextColor(expColor)
+                        textSize = sp(11.5f)
+                        setTypeface(null, Typeface.BOLD)
+                    })
+                    card.addView(flowRow)
+
+                    row.addView(card)
+                } else {
+                    row.addView(View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(0, dp(122), 1f).apply {
+                            leftMargin = dp(8)
+                        }
+                    })
+                }
+            }
+
+            container.addView(row)
+            idx += columns
+        }
+    }
+
+    private fun renderAccountDetailScreen(
+        container: LinearLayout,
+        account: AccountItem,
+        bgCard: Int,
+        bgPill: Int,
+        textPrimary: Int,
+        textSecondary: Int,
+        incColor: Int,
+        expColor: Int,
+        trnColor: Int,
+        nf: NumberFormat
+    ) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val summary = LedgerStorage.calculateAccountSummary(this, account)
+
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+        topBar.addView(makePillButton(isDark, "← 목록") {
+            selectedAccountId = null
+            refreshUI()
+        })
+        topBar.addView(View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(0, dp(1), 1f)
+        })
+        topBar.addView(makePillButton(isDark, "자동이체 설정") {
+            showAccountAutoTransferDialog(account)
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { rightMargin = dp(6) }
+        })
+        topBar.addView(makePillButton(isDark, "키워드 수정") {
+            showAccountKeywordsDialog(account)
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { rightMargin = dp(6) }
+        })
+        topBar.addView(makePillButton(isDark, "정보 수정") {
+            showEditAccountDialog(account)
+        })
+        container.addView(topBar)
+
+        val detailSummaryCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundBg(bgCard, 16)
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(10) }
+        }
+
+        val titleStr = if (account.institution.isNotBlank()) "${account.name} · ${account.institution}" else account.name
+        detailSummaryCard.addView(TextView(this).apply {
+            text = titleStr
+            setTextColor(textSecondary)
+            textSize = sp(13f)
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+        })
+
+        detailSummaryCard.addView(TextView(this).apply {
+            text = "${nf.format(summary.balance)}원"
+            setTextColor(textPrimary)
+            textSize = sp(25f)
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(8))
+        })
+
+        val ioRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        ioRow.addView(TextView(this).apply {
+            text = "유입 +${nf.format(summary.inflow)}원"
+            setTextColor(incColor)
+            textSize = sp(13f)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(10), 0, dp(10), 0)
+        })
+        ioRow.addView(TextView(this).apply {
+            text = "유출 -${nf.format(summary.outflow)}원"
+            setTextColor(expColor)
+            textSize = sp(13f)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(10), 0, dp(10), 0)
+        })
+        detailSummaryCard.addView(ioRow)
+
+        detailSummaryCard.addView(TextView(this).apply {
+            text = "시작 잔액 ${nf.format(account.initialBalance)}원 · 키워드: ${account.keywords}"
+            setTextColor(textSecondary)
+            textSize = sp(11f)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, 0)
+        })
+
+        if (account.autoTransferNote.isNotBlank()) {
+            detailSummaryCard.addView(TextView(this).apply {
+                text = "자동이체 메모: ${account.autoTransferNote}"
+                setTextColor(trnColor)
+                textSize = sp(11.5f)
+                setTypeface(null, Typeface.BOLD)
+                gravity = Gravity.CENTER
+                setPadding(0, dp(4), 0, 0)
+            })
+        }
+        container.addView(detailSummaryCard)
+
+        container.addView(TextView(this).apply {
+            text = "계좌 결제·이체 내역 ${summary.matchedRecords.size}건 (눌러서 상세 · 수정)"
+            setTextColor(textSecondary)
+            textSize = sp(12f)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(dp(4), dp(4), dp(4), dp(6))
+        })
+
+        renderRecordCards(
+            targetContainer = container,
+            records = summary.matchedRecords,
+            bgCard = bgCard,
+            textSecondary = textSecondary,
+            incColor = incColor,
+            expColor = expColor,
+            trnColor = trnColor,
+            nf = nf,
+            compact = false
+        )
+    }
+
+    private fun showAddAccountDialog() {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        fun addField(label: String, hintStr: String, isSignedNumber: Boolean = false): EditText {
+            box.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, dp(3))
+            })
+            return EditText(this).apply {
+                hint = hintStr
+                textSize = sp(14f)
+                if (isSignedNumber) {
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+                }
+                styleDialogEditText(this, isDark)
+                box.addView(this)
+            }
+        }
+
+        val nameEdit = addField("통장 이름", "예: 월급 통장, 생활비 통장, 여가 통장")
+        val instEdit = addField("은행 / 증권사", "예: 토스뱅크, 국민은행, 한국투자증권")
+        val initBalEdit = addField("시작 잔액 (원)", "숫자만 입력 (예: 1000000)", isSignedNumber = true)
+        val kwEdit = addField("자동 매칭 키워드 (쉼표로 구분)", "예: 생활비, 토뱅, 이정*")
+        val autoNoteEdit = addField("자동이체 설정 메모 (선택)", "예: 매월 25일 월급통장에서 80만원 입금")
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("계좌 추가")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val name = nameEdit.text.toString().trim()
+                val inst = instEdit.text.toString().trim()
+                val initBal = initBalEdit.text.toString().trim().toLongOrNull() ?: 0L
+                val kw = kwEdit.text.toString().trim().ifEmpty { name }
+                val note = autoNoteEdit.text.toString().trim()
+                if (name.isNotEmpty()) {
+                    LedgerStorage.addAccount(this, name, inst, initBal, kw, note)
+                    refreshUI()
+                } else {
+                    Toast.makeText(this, "통장 이름을 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun showEditAccountDialog(account: AccountItem) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        fun addField(label: String, initial: String, isSignedNumber: Boolean = false): EditText {
+            box.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, dp(3))
+            })
+            return EditText(this).apply {
+                setText(initial)
+                textSize = sp(14f)
+                if (isSignedNumber) {
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
+                }
+                styleDialogEditText(this, isDark)
+                box.addView(this)
+            }
+        }
+
+        val nameEdit = addField("통장 이름", account.name)
+        val instEdit = addField("은행 / 증권사", account.institution)
+        val initBalEdit = addField("시작 잔액 (원)", account.initialBalance.toString(), isSignedNumber = true)
+        val kwEdit = addField("자동 매칭 키워드", account.keywords)
+        val autoNoteEdit = addField("자동이체 설정 메모", account.autoTransferNote)
+
+        var dialogRef: AlertDialog? = null
+        val deleteBtn = makePillButton(isDark, "계좌 삭제", isActive = false) {
+            AlertDialog.Builder(this@MainActivity, getDialogTheme(isDark))
+                .setTitle("계좌 삭제")
+                .setMessage("\"${account.name}\" 계좌를 삭제할까요?")
+                .setPositiveButton("삭제") { _, _ ->
+                    LedgerStorage.removeAccount(this@MainActivity, account.id)
+                    selectedAccountId = null
+                    dialogRef?.dismiss()
+                    refreshUI()
+                }
+                .setNegativeButton("취소", null)
+                .show()
+        }.apply {
+            setTextColor(Color.parseColor("#E56B6F"))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(14) }
+        }
+        box.addView(deleteBtn)
+
+        scroll.addView(box)
+
+        dialogRef = AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("계좌 정보 수정")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val name = nameEdit.text.toString().trim()
+                if (name.isEmpty()) {
+                    Toast.makeText(this, "통장 이름을 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val inst = instEdit.text.toString().trim()
+                val initBal = initBalEdit.text.toString().trim().toLongOrNull() ?: account.initialBalance
+                val kw = kwEdit.text.toString().trim().ifEmpty { name }
+                val note = autoNoteEdit.text.toString().trim()
+                LedgerStorage.updateAccount(this, account.id, name, inst, initBal, kw, note)
+                refreshUI()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun showAccountAutoTransferDialog(account: AccountItem) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+        box.addView(TextView(this).apply {
+            text = "${account.name} 자동이체 설정 / 메모"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(6))
+        })
+        val noteEdit = EditText(this).apply {
+            setText(account.autoTransferNote)
+            hint = "예: 매월 25일 월급통장에서 800,000원 이체"
+            minLines = 2
+            styleDialogEditText(this, isDark)
+        }
+        box.addView(noteEdit)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("자동이체 설정")
+            .setView(box)
+            .setPositiveButton("저장") { _, _ ->
+                LedgerStorage.updateAccount(
+                    this,
+                    account.id,
+                    account.name,
+                    account.institution,
+                    account.initialBalance,
+                    account.keywords,
+                    noteEdit.text.toString().trim()
+                )
+                refreshUI()
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun showAccountKeywordsDialog(account: AccountItem) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+        box.addView(TextView(this).apply {
+            text = "알림/내역과 이 계좌를 연결할 키워드 (쉼표로 구분)"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(6))
+        })
+        val kwEdit = EditText(this).apply {
+            setText(account.keywords)
+            hint = "예: 생활비, 토뱅, 이정*"
+            styleDialogEditText(this, isDark)
+        }
+        box.addView(kwEdit)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("키워드 수정")
+            .setView(box)
+            .setPositiveButton("저장") { _, _ ->
+                val kw = kwEdit.text.toString().trim().ifEmpty { account.name }
+                LedgerStorage.updateAccount(
+                    this,
+                    account.id,
+                    account.name,
+                    account.institution,
+                    account.initialBalance,
+                    kw,
+                    account.autoTransferNote
+                )
+                refreshUI()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private fun getDialogTheme(isDark: Boolean): Int {
@@ -348,7 +883,7 @@ class MainActivity : Activity() {
             setTypeface(null, if (isActive) Typeface.BOLD else Typeface.NORMAL)
             setTextColor(if (isActive) Color.WHITE else neutralText)
             background = roundBg(if (isActive) activeBg else neutralBg, 18)
-            setPadding(dp(13), dp(7), dp(13), dp(7))
+            setPadding(dp(12), dp(7), dp(12), dp(7))
             setOnClickListener { onClick() }
         }
     }
