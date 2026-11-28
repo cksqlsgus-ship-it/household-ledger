@@ -11,6 +11,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class FixedExpenseItem(
+    val id: String,
+    val title: String,
+    val startDay: Int,
+    val endDay: Int,
+    val amount: Long,
+    val keyword: String
+)
+
+data class AutoRule(
+    val id: String,
+    val keyword: String,
+    val action: String,
+    val category: String
+)
+
 data class AccountItem(
     val id: String,
     val name: String,
@@ -194,7 +210,6 @@ object LedgerStorage {
                 (type == "trn" && merchant.substringBefore("→", "").let { matchesAccount(account, it) })
             val isToMatch = matchesAccount(account, "$toAcc $raw") ||
                 (type == "trn" && merchant.substringAfter("→", "").let { matchesAccount(account, it) })
-            val isGeneralMatch = isFromMatch || isToMatch || matchesAccount(account, "$merchant $fromAcc $toAcc")
 
             when (type) {
                 "inc" -> {
