@@ -498,6 +498,27 @@ class MainActivity : Activity() {
         }.timeInMillis
     }
 
+    // payDay가 0(말일 지정)이거나 해당 월의 마지막 날 이상이면 그 달의 실제 말일을 반환
+    private fun resolveEffectivePayDay(year: Int, month: Int, payDay: Int): Int {
+        val maxDay = Calendar.getInstance().apply {
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.getActualMaximum(Calendar.DAY_OF_MONTH)
+        return if (payDay <= 0 || payDay >= 31) maxDay else payDay.coerceIn(1, maxDay)
+    }
+
+    private fun parsePayDayInput(raw: String): Int {
+        val trimmed = raw.trim()
+        if (trimmed.contains("말일") || trimmed == "0") return 0
+        val num = trimmed.replace(Regex("[^0-9]"), "").toIntOrNull() ?: 1
+        return if (num >= 31) 0 else num.coerceIn(1, 30)
+    }
+
+    private fun formatPayDayLabel(payDay: Int): String {
+        return if (payDay <= 0) "매월 말일" else "매월 ${payDay}일"
+    }
+
     private fun buildPeriodFilterCard(isDark: Boolean, compact: Boolean = false): LinearLayout {
         val bgCard = if (isDark) Color.parseColor("#1C1C1E") else Color.WHITE
         val chipBg = if (isDark) Color.parseColor("#2C2C2E") else Color.parseColor("#E5E5EA")
@@ -1405,7 +1426,8 @@ class MainActivity : Activity() {
         }
 
         for ((fe, isDone, effectiveAmt) in statusPairs) {
-            val dDiff = fe.payDay - curDay
+            val effectiveDay = resolveEffectivePayDay(curYear, curMonth, fe.payDay)
+            val dDiff = effectiveDay - curDay
             val dDayLabel = when {
                 isDone -> "✓ 완료"
                 dDiff == 0 -> "오늘 결제일"
@@ -1438,8 +1460,14 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
 
+            val dayText = if (fe.payDay <= 0) {
+                "${formatPayDayLabel(fe.payDay)} (${effectiveDay}일)"
+            } else {
+                formatPayDayLabel(fe.payDay)
+            }
+
             infoCol.addView(TextView(this).apply {
-                text = "[$dDayLabel] · 매월 ${fe.payDay}일"
+                text = "[$dDayLabel] · $dayText"
                 setTextColor(badgeColor)
                 textSize = sp(10.5f)
                 setTypeface(null, Typeface.BOLD)
@@ -1498,8 +1526,7 @@ class MainActivity : Activity() {
                         val cal = Calendar.getInstance().apply {
                             set(Calendar.YEAR, curYear)
                             set(Calendar.MONTH, curMonth)
-                            val maxD = getActualMaximum(Calendar.DAY_OF_MONTH)
-                            set(Calendar.DAY_OF_MONTH, fe.payDay.coerceIn(1, maxD))
+                            set(Calendar.DAY_OF_MONTH, effectiveDay)
                         }
                         val ts = cal.timeInMillis
                         val dStr = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA).format(Date(ts))
@@ -1569,7 +1596,7 @@ class MainActivity : Activity() {
         }
 
         val titleEdit = addField("고정 지출 이름", "예: 월세, 관리비, 통신비, 유튜브")
-        val dayEdit = addField("매월 결제일 (1~31일)", "예: 25", isNumber = true)
+        val dayEdit = addField("매월 결제일 (말일은 0 또는 말일 입력)", "예: 25, 말일, 0")
         val amtEdit = addField("예상 금액 (원)", "숫자만 입력", isNumber = true)
         val kwEdit = addField("알림/메일 자동 매칭 단어 (선택)", "비워두면 이름 기준으로 자동 확인")
 
@@ -1580,7 +1607,7 @@ class MainActivity : Activity() {
             .setView(scroll)
             .setPositiveButton("저장") { _, _ ->
                 val title = titleEdit.text.toString().trim()
-                val day = (dayEdit.text.toString().trim().toIntOrNull() ?: 1).coerceIn(1, 31)
+                val day = parsePayDayInput(dayEdit.text.toString())
                 val amt = amtEdit.text.toString().trim().toLongOrNull() ?: 0L
                 val kw = kwEdit.text.toString().trim().ifEmpty { title }
 
@@ -3847,11 +3874,11 @@ object LedgerStorage {
                 FixedExpenseItem(
                     id = o.optString("id", i.toString()),
                     title = o.optString("title", ""),
-                    payDay = o.optInt("payDay", 1).coerceIn(1, 31),
+                    payDay = o.optInt("payDay", 1).coerceIn(0, 31),
                     amount = o.optLong("amount", 0L),
                     keyword = o.optString("keyword", "")
                 )
-            }.sortedBy { it.payDay }
+            }.sortedBy { if (it.payDay <= 0) 32 else it.payDay }
         } catch (_: Exception) {
             emptyList()
         }
@@ -3863,7 +3890,7 @@ object LedgerStorage {
             FixedExpenseItem(
                 id = System.currentTimeMillis().toString(),
                 title = title,
-                payDay = payDay.coerceIn(1, 31),
+                payDay = payDay.coerceIn(0, 31),
                 amount = amount,
                 keyword = keyword
             )
