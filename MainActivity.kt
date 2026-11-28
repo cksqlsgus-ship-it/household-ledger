@@ -71,10 +71,6 @@ class MainActivity : Activity() {
     }
 
     private lateinit var rootLayout: LinearLayout
-    private lateinit var headerLayout: LinearLayout
-    private lateinit var headerTitleText: TextView
-    private lateinit var headerBadgeText: TextView
-
     private lateinit var contentHost: FrameLayout
     private lateinit var navDivider: View
     private lateinit var bottomNavBar: LinearLayout
@@ -119,36 +115,6 @@ class MainActivity : Activity() {
         rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-
-        headerLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(16), dp(20), dp(12))
-        }
-
-        headerTitleText = TextView(this).apply {
-            text = "전체"
-            textSize = sp(22f)
-            setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        headerLayout.addView(headerTitleText)
-
-        headerBadgeText = TextView(this).apply {
-            textSize = sp(11f)
-            setTypeface(null, Typeface.BOLD)
-            setPadding(dp(10), dp(5), dp(10), dp(5))
-            setOnClickListener {
-                if (!isNotificationGranted()) {
-                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                } else {
-                    currentTab = "settings"
-                    refreshUI()
-                }
-            }
-        }
-        headerLayout.addView(headerBadgeText)
-        rootLayout.addView(headerLayout)
 
         contentHost = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -227,32 +193,10 @@ class MainActivity : Activity() {
         val bgPage = if (isDark) Color.parseColor("#0F0F0F") else Color.parseColor("#F4F4F6")
         val bgNav = if (isDark) Color.parseColor("#141414") else Color.WHITE
         val dividerColor = if (isDark) Color.parseColor("#262629") else Color.parseColor("#E5E5EA")
-        val textPrimary = if (isDark) Color.parseColor("#F5F5F7") else Color.parseColor("#111827")
-        val pillBg = if (isDark) Color.parseColor("#1C1C1E") else Color.parseColor("#E5E5EA")
 
         rootLayout.setBackgroundColor(bgPage)
-        headerLayout.setBackgroundColor(bgPage)
         navDivider.setBackgroundColor(dividerColor)
         bottomNavBar.setBackgroundColor(bgNav)
-
-        headerTitleText.setTextColor(textPrimary)
-        headerTitleText.textSize = sp(22f)
-        headerTitleText.text = when (currentTab) {
-            "analysis" -> "분석"
-            "settings" -> "설정"
-            else -> "전체"
-        }
-
-        headerBadgeText.textSize = sp(11f)
-        if (isNotificationGranted()) {
-            headerBadgeText.text = "● 알림감지 ON"
-            headerBadgeText.setTextColor(if (isDark) Color.parseColor("#D1D5DB") else Color.parseColor("#374151"))
-            headerBadgeText.background = roundBg(pillBg, 14)
-        } else {
-            headerBadgeText.text = "● 알림감지 OFF"
-            headerBadgeText.setTextColor(Color.WHITE)
-            headerBadgeText.background = roundBg(Color.parseColor("#B93844"), 14)
-        }
 
         renderBottomNavBar(isDark)
 
@@ -263,7 +207,7 @@ class MainActivity : Activity() {
                 activeAllScrollView = scroll
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(dp(16), dp(4), dp(16), dp(24))
+                    setPadding(dp(16), dp(10), dp(16), dp(24))
                 }
                 renderAllTab(isDark, container)
                 scroll.addView(container)
@@ -286,7 +230,7 @@ class MainActivity : Activity() {
                 val scroll = ScrollView(this)
                 val container = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
-                    setPadding(dp(16), dp(4), dp(16), dp(28))
+                    setPadding(dp(16), dp(10), dp(16), dp(28))
                 }
                 renderSettingsTab(isDark, container)
                 scroll.addView(container)
