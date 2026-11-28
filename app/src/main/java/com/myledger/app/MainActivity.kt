@@ -230,11 +230,14 @@ class MainActivity : Activity() {
     private fun renderBottomNavBar(isDark: Boolean) {
         bottomNavBar.removeAllViews()
 
+        val unmatchedCount = LedgerStorage.getUnmatchedAlerts(this).size
+        val settingsLabel = if (unmatchedCount > 0) "설정($unmatchedCount)" else "설정"
+
         val tabs = listOf(
             Triple("all", "▤", "전체"),
             Triple("accounts", "🏦", "계좌"),
             Triple("analysis", "◔", "분석"),
-            Triple("settings", "⚙", "설정")
+            Triple("settings", "⚙", settingsLabel)
         )
 
         val activeAccent = Color.parseColor("#C83E4D")
@@ -2376,6 +2379,224 @@ class MainActivity : Activity() {
         groupCard.addView(rowEmail)
         groupCard.addView(makeDivider(isDark))
 
+        // --- 단어 통과 · 무시 · 자동 분류 규칙 ---
+        val rulesHeaderRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val rulesTitleCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(8)
+            }
+        }
+        rulesTitleCol.addView(TextView(this).apply {
+            text = "🏷️  단어 통과 · 무시 · 자동 분류 규칙"
+            setTextColor(textPrimary)
+            textSize = sp(15f)
+            setTypeface(null, Typeface.BOLD)
+        })
+        rulesTitleCol.addView(TextView(this).apply {
+            text = "무시 단어 우선 차단 · 통과 단어만 기록 · 둘 다 없으면 보류함 이동"
+            setTextColor(textSecondary)
+            textSize = sp(12f)
+            setPadding(0, dp(3), 0, 0)
+        })
+        rulesHeaderRow.addView(rulesTitleCol)
+        rulesHeaderRow.addView(makePillButton(isDark, "+ 규칙 추가", isActive = true) {
+            showRuleDialog(existing = null)
+        })
+        groupCard.addView(rulesHeaderRow)
+
+        val rules = LedgerStorage.getAutoRules(this)
+        if (rules.isNotEmpty()) {
+            val rulesBox = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, dp(10), 0, 0)
+            }
+            for (rule in rules) {
+                val badgeLabel = when (rule.action) {
+                    "pass" -> "✓ 통과"
+                    "ignore", "delete" -> "🚫 무시"
+                    "transfer" -> "⇄ 이체"
+                    else -> rule.category
+                }
+                val badgeColor = when (rule.action) {
+                    "pass" -> Color.parseColor("#6495ED")
+                    "ignore", "delete" -> Color.parseColor("#E56B6F")
+                    "transfer" -> Color.parseColor("#A78BFA")
+                    else -> Color.parseColor("#34D399")
+                }
+
+                val rCard = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = roundBg(bgPill, 12)
+                    setPadding(dp(12), dp(8), dp(12), dp(8))
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(6) }
+                    setOnClickListener {
+                        showRuleDialog(existing = rule)
+                    }
+                }
+
+                val topLine = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                topLine.addView(TextView(this).apply {
+                    text = "[$badgeLabel]"
+                    setTextColor(badgeColor)
+                    textSize = sp(11f)
+                    setTypeface(null, Typeface.BOLD)
+                    setPadding(0, 0, dp(8), 0)
+                })
+                topLine.addView(TextView(this).apply {
+                    text = if (rule.keyword.isNotBlank()) "포함: \"${rule.keyword}\"" else "무시 전용 규칙"
+                    setTextColor(textPrimary)
+                    textSize = sp(13f)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                topLine.addView(TextView(this).apply {
+                    text = "삭제"
+                    setTextColor(textSecondary)
+                    textSize = sp(11f)
+                    setPadding(dp(8), dp(2), dp(2), dp(2))
+                    setOnClickListener {
+                        LedgerStorage.removeAutoRule(this@MainActivity, rule.id)
+                        refreshUI()
+                    }
+                })
+                rCard.addView(topLine)
+
+                if (rule.ignoreKeywords.isNotBlank()) {
+                    rCard.addView(TextView(this).apply {
+                        text = "무시(우선): \"${rule.ignoreKeywords}\""
+                        setTextColor(Color.parseColor("#E56B6F"))
+                        textSize = sp(11.5f)
+                        setPadding(0, dp(3), 0, 0)
+                    })
+                }
+
+                rulesBox.addView(rCard)
+            }
+
+            val applyRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.END
+                setPadding(0, dp(4), 0, 0)
+            }
+            applyRow.addView(makePillButton(isDark, "바뀐 규칙 적용 (보류함 + 기존 내역)") {
+                val (promoted, ignored) = LedgerStorage.reprocessUnmatchedAlerts(this)
+                val existingChanged = LedgerStorage.applyAutoRulesToExistingRecords(this)
+                refreshUI()
+                Toast.makeText(
+                    this,
+                    "보류함 기록 ${promoted}건 / 무시 ${ignored}건 / 기존 내역 ${existingChanged}건 반영됨",
+                    Toast.LENGTH_LONG
+                ).show()
+            })
+            rulesBox.addView(applyRow)
+            groupCard.addView(rulesBox)
+        }
+        groupCard.addView(makeDivider(isDark))
+
+        // --- 미분류 · 보류 알림 목록 ---
+        val unmatchedAlerts = LedgerStorage.getUnmatchedAlerts(this)
+        val unmatchedHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val unmatchedTitleCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                rightMargin = dp(8)
+            }
+        }
+        unmatchedTitleCol.addView(TextView(this).apply {
+            text = "📥  미분류·보류 알림 (${unmatchedAlerts.size}건)"
+            setTextColor(textPrimary)
+            textSize = sp(15f)
+            setTypeface(null, Typeface.BOLD)
+        })
+        unmatchedTitleCol.addView(TextView(this).apply {
+            text = "통과·무시 단어 둘 다 없던 알림 (눌러서 기록/무시 처리)"
+            setTextColor(textSecondary)
+            textSize = sp(12f)
+            setPadding(0, dp(3), 0, 0)
+        })
+        unmatchedHeader.addView(unmatchedTitleCol)
+
+        if (unmatchedAlerts.isNotEmpty()) {
+            unmatchedHeader.addView(makePillButton(isDark, "전체 비우기") {
+                LedgerStorage.clearUnmatchedAlerts(this)
+                refreshUI()
+            })
+        }
+        groupCard.addView(unmatchedHeader)
+
+        val unmatchedBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        if (unmatchedAlerts.isEmpty()) {
+            unmatchedBox.addView(TextView(this).apply {
+                text = "보류 중인 미분류 알림이 없습니다."
+                setTextColor(textSecondary)
+                textSize = sp(12f)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
+            })
+        } else {
+            val timeFmt = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA)
+            for (alert in unmatchedAlerts) {
+                val uCard = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = roundBg(bgPill, 12)
+                    setPadding(dp(12), dp(9), dp(12), dp(9))
+                    layoutParams = LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(6) }
+                    setOnClickListener {
+                        showUnmatchedAlertActionDialog(alert)
+                    }
+                }
+
+                val topRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                topRow.addView(TextView(this).apply {
+                    text = alert.title.ifBlank { alert.packageName }
+                    setTextColor(textPrimary)
+                    textSize = sp(13f)
+                    setTypeface(null, Typeface.BOLD)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                topRow.addView(TextView(this).apply {
+                    text = if (alert.timestamp > 0L) timeFmt.format(Date(alert.timestamp)) else ""
+                    setTextColor(textSecondary)
+                    textSize = sp(11f)
+                })
+                uCard.addView(topRow)
+
+                if (alert.body.isNotBlank()) {
+                    uCard.addView(TextView(this).apply {
+                        text = alert.body
+                        setTextColor(textSecondary)
+                        textSize = sp(11.5f)
+                        maxLines = 3
+                        setPadding(0, dp(3), 0, 0)
+                    })
+                }
+                unmatchedBox.addView(uCard)
+            }
+        }
+        groupCard.addView(unmatchedBox)
+        groupCard.addView(makeDivider(isDark))
+
+        // --- 양식 규칙 (템플릿) ---
         val tplHeaderRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -2399,7 +2620,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(3), 0, 0)
         })
         tplHeaderRow.addView(tplTitleCol)
-        tplHeaderRow.addView(makePillButton(isDark, "+ 규칙 추가", isActive = true) {
+        tplHeaderRow.addView(makePillButton(isDark, "+ 규칙 추가") {
             showParserTemplateDialog(existing = null)
         })
         groupCard.addView(tplHeaderRow)
@@ -2411,7 +2632,7 @@ class MainActivity : Activity() {
         }
         if (templates.isEmpty()) {
             tplBox.addView(TextView(this).apply {
-                text = "등록된 양식 규칙이 없습니다. '+ 규칙 추가'로 패턴을 만들어 보세요."
+                text = "등록된 양식 규칙이 없습니다."
                 setTextColor(textSecondary)
                 textSize = sp(12f)
                 setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -2484,106 +2705,6 @@ class MainActivity : Activity() {
         groupCard.addView(tplBox)
         groupCard.addView(makeDivider(isDark))
 
-        val rulesHeaderRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val rulesTitleCol = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                rightMargin = dp(8)
-            }
-        }
-        rulesTitleCol.addView(TextView(this).apply {
-            text = "🏷️  단어 자동 분류 · 삭제 규칙"
-            setTextColor(textPrimary)
-            textSize = sp(15f)
-            setTypeface(null, Typeface.BOLD)
-        })
-        rulesTitleCol.addView(TextView(this).apply {
-            text = "특정 단어가 포함된 알림을 자동 삭제하거나 이체·카테고리로 분류"
-            setTextColor(textSecondary)
-            textSize = sp(12f)
-            setPadding(0, dp(3), 0, 0)
-        })
-        rulesHeaderRow.addView(rulesTitleCol)
-        rulesHeaderRow.addView(makePillButton(isDark, "+ 규칙 추가") {
-            showAddRuleDialog()
-        })
-        groupCard.addView(rulesHeaderRow)
-
-        val rules = LedgerStorage.getAutoRules(this)
-        if (rules.isNotEmpty()) {
-            val rulesBox = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(10), 0, 0)
-            }
-            for (rule in rules) {
-                val badgeLabel = when (rule.action) {
-                    "delete" -> "자동삭제"
-                    "transfer" -> "⇄ 이체"
-                    else -> rule.category
-                }
-                val badgeColor = when (rule.action) {
-                    "delete" -> Color.parseColor("#E56B6F")
-                    "transfer" -> Color.parseColor("#A78BFA")
-                    else -> Color.parseColor("#34D399")
-                }
-
-                val rRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    background = roundBg(bgPill, 12)
-                    setPadding(dp(12), dp(7), dp(12), dp(7))
-                    layoutParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.WRAP_CONTENT
-                    ).apply { bottomMargin = dp(6) }
-                }
-
-                rRow.addView(TextView(this).apply {
-                    text = "[$badgeLabel]"
-                    setTextColor(badgeColor)
-                    textSize = sp(11f)
-                    setTypeface(null, Typeface.BOLD)
-                    setPadding(0, 0, dp(8), 0)
-                })
-
-                rRow.addView(TextView(this).apply {
-                    text = "\"${rule.keyword}\""
-                    setTextColor(textPrimary)
-                    textSize = sp(13f)
-                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                })
-
-                rRow.addView(TextView(this).apply {
-                    text = "삭제"
-                    setTextColor(textSecondary)
-                    textSize = sp(11f)
-                    setPadding(dp(8), dp(2), dp(2), dp(2))
-                    setOnClickListener {
-                        LedgerStorage.removeAutoRule(this@MainActivity, rule.id)
-                        refreshUI()
-                    }
-                })
-                rulesBox.addView(rRow)
-            }
-
-            val applyRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.END
-                setPadding(0, dp(4), 0, 0)
-            }
-            applyRow.addView(makePillButton(isDark, "기존 내역에도 규칙 적용") {
-                val changed = LedgerStorage.applyAutoRulesToExistingRecords(this)
-                refreshUI()
-                Toast.makeText(this, "기존 내역 ${changed}건에 규칙이 반영되었습니다.", Toast.LENGTH_SHORT).show()
-            })
-            rulesBox.addView(applyRow)
-            groupCard.addView(rulesBox)
-        }
-        groupCard.addView(makeDivider(isDark))
-
         val rowDark = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -2636,6 +2757,194 @@ class MainActivity : Activity() {
         groupCard.addView(scaleRow)
 
         container.addView(groupCard)
+    }
+
+    private fun showUnmatchedAlertActionDialog(alert: UnmatchedAlertItem) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        box.addView(TextView(this).apply {
+            text = "제목: ${alert.title}\n\n내용:\n${alert.body}"
+            textSize = sp(13f)
+            setTextColor(labelColor)
+            setPadding(0, 0, 0, dp(12))
+        })
+
+        var dialogRef: AlertDialog? = null
+
+        box.addView(makePillButton(isDark, "가계부에 바로 기록 (강제 통과)", isActive = true) {
+            val parsed = NotificationParser.parse(this, alert.title, alert.body)
+            val amt = if (parsed.amount > 0L) parsed.amount else 0L
+            if (amt <= 0L) {
+                Toast.makeText(this, "금액 숫자가 없어 자동 기록할 수 없습니다.", Toast.LENGTH_SHORT).show()
+                return@makePillButton
+            }
+            LedgerStorage.addOrMergeRecord(
+                context = this,
+                type = parsed.type,
+                category = parsed.category,
+                merchant = parsed.merchant,
+                fromAccount = parsed.fromAccount,
+                toAccount = parsed.toAccount,
+                balanceInfo = parsed.balanceInfo,
+                item = parsed.itemSummary,
+                quantity = parsed.totalQuantity,
+                amount = amt,
+                raw = parsed.cleanRawText,
+                itemsJson = parsed.itemsJson,
+                imagePath = "",
+                auto = true,
+                customTimestamp = if (alert.timestamp > 0L) alert.timestamp else System.currentTimeMillis()
+            )
+            LedgerStorage.removeUnmatchedAlert(this, alert.id)
+            dialogRef?.dismiss()
+            refreshUI()
+            Toast.makeText(this, "가계부에 기록되었습니다.", Toast.LENGTH_SHORT).show()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(8) }
+        })
+
+        box.addView(makePillButton(isDark, "이 알림 무시 및 보류함에서 삭제") {
+            LedgerStorage.removeUnmatchedAlert(this, alert.id)
+            dialogRef?.dismiss()
+            refreshUI()
+        }.apply {
+            setTextColor(Color.parseColor("#E56B6F"))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        })
+
+        scroll.addView(box)
+
+        dialogRef = AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("미분류 알림 처리")
+            .setView(scroll)
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    private fun showRuleDialog(existing: AutoRule?) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        box.addView(TextView(this).apply {
+            text = "실행할 동작"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(4))
+        })
+
+        val actionCodes = listOf("pass", "ignore", "transfer", "category")
+        val actionLabels = listOf(
+            "✓ 통과 (포함 단어 있으면 기록, 없으면 보류)",
+            "🚫 무시 (해당 단어 있으면 무조건 기록 안 함)",
+            "⇄ 내 통장간 이동 (이체로 자동 분류 및 통과)",
+            "🏷️ 특정 카테고리로 자동 분류 및 통과"
+        )
+        val normalizedAction = when (existing?.action) {
+            "delete", "ignore" -> "ignore"
+            "transfer" -> "transfer"
+            "category" -> "category"
+            else -> "pass"
+        }
+        val initActionIdx = actionCodes.indexOf(normalizedAction).coerceAtLeast(0)
+        val actionSpinner = makeThemedSpinner(isDark, actionLabels, initActionIdx)
+        box.addView(actionSpinner)
+
+        box.addView(TextView(this).apply {
+            text = "통과 / 분류할 단어 (쉼표로 구분)"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(4))
+        })
+        val keywordEdit = EditText(this).apply {
+            setText(existing?.keyword ?: "")
+            hint = "예: 승인, 결제, 입금, 출금, USD, ₩"
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+        }
+        box.addView(keywordEdit)
+
+        box.addView(TextView(this).apply {
+            text = "무시할 단어 (같이 있으면 무조건 무시 · 쉼표로 구분)"
+            textSize = sp(12f)
+            setTextColor(Color.parseColor("#E56B6F"))
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(4))
+        })
+        val ignoreEdit = EditText(this).apply {
+            setText(existing?.ignoreKeywords ?: "")
+            hint = "예: 광고, 쿠폰, 이벤트, 적립, 부터: 매월"
+            textSize = sp(14f)
+            styleDialogEditText(this, isDark)
+        }
+        box.addView(ignoreEdit)
+
+        val catLabel = TextView(this).apply {
+            text = "지정할 카테고리"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        val catIdx = NotificationParser.CATEGORIES.indexOf(existing?.category ?: "기타").coerceAtLeast(0)
+        val catSpinner = makeThemedSpinner(isDark, NotificationParser.CATEGORIES, catIdx)
+        box.addView(catLabel)
+        box.addView(catSpinner)
+
+        actionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val showCat = (position == 3)
+                catLabel.visibility = if (showCat) View.VISIBLE else View.GONE
+                catSpinner.visibility = if (showCat) View.VISIBLE else View.GONE
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle(if (existing == null) "단어 통과·무시 규칙 추가" else "단어 통과·무시 규칙 수정")
+            .setView(scroll)
+            .setPositiveButton("규칙 저장") { _, _ ->
+                val kw = keywordEdit.text.toString().trim()
+                val ign = ignoreEdit.text.toString().trim()
+                if (kw.isEmpty() && ign.isEmpty()) {
+                    Toast.makeText(this, "통과 단어 또는 무시 단어를 하나 이상 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val action = actionCodes.getOrElse(actionSpinner.selectedItemPosition) { "pass" }
+                val targetCat = if (action == "transfer") "이체/계좌이동" else catSpinner.selectedItem.toString()
+
+                if (existing == null) {
+                    LedgerStorage.addAutoRule(this, kw, ign, action, targetCat)
+                } else {
+                    LedgerStorage.updateAutoRule(this, existing.id, kw, ign, action, targetCat)
+                }
+                refreshUI()
+                Toast.makeText(this, "규칙이 저장되었습니다. '바뀐 규칙 적용'을 누르면 보류함에도 즉시 반영됩니다.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("취소", null)
+            .show()
     }
 
     private data class FieldExtractorInputs(
@@ -2911,93 +3220,6 @@ class MainActivity : Activity() {
                 }
                 refreshUI()
                 Toast.makeText(this, "\"$tplName\" 규칙이 저장되었습니다.", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("취소", null)
-            .show()
-    }
-
-    private fun showAddRuleDialog() {
-        val isDark = LedgerStorage.isDarkMode(this)
-        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
-
-        val scroll = ScrollView(this)
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(10))
-        }
-
-        box.addView(TextView(this).apply {
-            text = "인식할 특정 단어"
-            textSize = sp(12f)
-            setTextColor(labelColor)
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(4))
-        })
-        val keywordEdit = EditText(this).apply {
-            hint = "예: 토뱅, 스타벅스, 광고, 캐시백"
-            textSize = sp(14f)
-            styleDialogEditText(this, isDark)
-        }
-        box.addView(keywordEdit)
-
-        box.addView(TextView(this).apply {
-            text = "해당 단어가 포함될 때 실행할 동작"
-            textSize = sp(12f)
-            setTextColor(labelColor)
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, dp(12), 0, dp(4))
-        })
-        val actionSpinner = makeThemedSpinner(
-            isDark,
-            listOf(
-                "🗑️ 자동 삭제 (가계부에 기록 안 함)",
-                "⇄ 내 통장간 이동 (이체로 자동 분류)",
-                "🏷️ 특정 카테고리로 자동 분류"
-            ),
-            2
-        )
-        box.addView(actionSpinner)
-
-        val catLabel = TextView(this).apply {
-            text = "지정할 카테고리"
-            textSize = sp(12f)
-            setTextColor(labelColor)
-            setTypeface(null, Typeface.BOLD)
-            setPadding(0, dp(12), 0, dp(4))
-        }
-        val catSpinner = makeThemedSpinner(isDark, NotificationParser.CATEGORIES, 0)
-        box.addView(catLabel)
-        box.addView(catSpinner)
-
-        actionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val showCat = (position == 2)
-                catLabel.visibility = if (showCat) View.VISIBLE else View.GONE
-                catSpinner.visibility = if (showCat) View.VISIBLE else View.GONE
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        scroll.addView(box)
-
-        AlertDialog.Builder(this, getDialogTheme(isDark))
-            .setTitle("단어 자동 인식 규칙 추가")
-            .setView(scroll)
-            .setPositiveButton("규칙 저장") { _, _ ->
-                val kw = keywordEdit.text.toString().trim()
-                if (kw.isEmpty()) {
-                    Toast.makeText(this, "인식할 단어를 입력해 주세요.", Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                val action = when (actionSpinner.selectedItemPosition) {
-                    0 -> "delete"
-                    1 -> "transfer"
-                    else -> "category"
-                }
-                val targetCat = if (action == "transfer") "이체/계좌이동" else catSpinner.selectedItem.toString()
-                LedgerStorage.addAutoRule(this, kw, action, targetCat)
-                refreshUI()
-                Toast.makeText(this, "\"$kw\" 규칙이 추가되었습니다.", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("취소", null)
             .show()
