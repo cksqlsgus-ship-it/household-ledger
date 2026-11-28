@@ -1573,6 +1573,22 @@ class MainActivity : Activity() {
                 btnRow.addView(recordNowBtn)
             }
 
+            val editFixedBtn = TextView(this).apply {
+                text = "수정"
+                textSize = sp(11f)
+                setTextColor(textPrimary)
+                background = roundBg(bgPill, 12)
+                setPadding(dp(10), dp(5), dp(10), dp(5))
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { rightMargin = dp(6) }
+                setOnClickListener {
+                    showEditFixedExpenseDialog(fe)
+                }
+            }
+            btnRow.addView(editFixedBtn)
+
             val delFixedBtn = TextView(this).apply {
                 text = "삭제"
                 textSize = sp(11f)
@@ -1680,6 +1696,107 @@ class MainActivity : Activity() {
 
                 if (title.isNotEmpty() && amt > 0L) {
                     LedgerStorage.addFixedExpense(this, title, startD, endD, amt, kw)
+                    refreshUI()
+                } else {
+                    Toast.makeText(this, "항목 이름과 금액을 입력해 주세요.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun showEditFixedExpenseDialog(item: FixedExpenseItem) {
+        val isDark = LedgerStorage.isDarkMode(this)
+        val labelColor = if (isDark) Color.parseColor("#E5E7EB") else Color.parseColor("#374151")
+
+        val scroll = ScrollView(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(10))
+        }
+
+        fun addField(label: String, initialValue: String, hintStr: String, isNumber: Boolean = false): EditText {
+            box.addView(TextView(this).apply {
+                text = label
+                textSize = sp(12f)
+                setTextColor(labelColor)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, dp(3))
+            })
+            return EditText(this).apply {
+                setText(initialValue)
+                hint = hintStr
+                textSize = sp(14f)
+                if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
+                styleDialogEditText(this, isDark)
+                box.addView(this)
+            }
+        }
+
+        val titleEdit = addField("고정 지출 이름", item.title, "예: 월세, 관리비, 통신비, 유튜브")
+
+        box.addView(TextView(this).apply {
+            text = "결제 기간 (시작일 ~ 종료일 · 말일은 0 또는 말일)"
+            textSize = sp(12f)
+            setTextColor(labelColor)
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(3))
+        })
+
+        val rangeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val startDayEdit = EditText(this).apply {
+            setText(item.startDay.toString())
+            hint = "시작일 (예: 20)"
+            textSize = sp(14f)
+            inputType = InputType.TYPE_CLASS_NUMBER
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        val tildeView = TextView(this).apply {
+            text = "~"
+            textSize = sp(16f)
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(labelColor)
+            setPadding(dp(8), 0, dp(8), 0)
+        }
+
+        val endDayEdit = EditText(this).apply {
+            setText(if (item.endDay <= 0 || item.endDay >= 31) "말일" else item.endDay.toString())
+            hint = "종료일 (예: 25, 말일)"
+            textSize = sp(14f)
+            inputType = InputType.TYPE_CLASS_TEXT
+            styleDialogEditText(this, isDark)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
+        rangeRow.addView(startDayEdit)
+        rangeRow.addView(tildeView)
+        rangeRow.addView(endDayEdit)
+        box.addView(rangeRow)
+
+        val amtEdit = addField("예상 금액 (원)", item.amount.toString(), "숫자만 입력", isNumber = true)
+        val kwEdit = addField("알림/메일 자동 매칭 단어 (선택)", item.keyword, "비워두면 이름 기준으로 자동 확인")
+
+        scroll.addView(box)
+
+        AlertDialog.Builder(this, getDialogTheme(isDark))
+            .setTitle("고정 지출 수정")
+            .setView(scroll)
+            .setPositiveButton("저장") { _, _ ->
+                val title = titleEdit.text.toString().trim()
+                val startD = parseStartDayInput(startDayEdit.text.toString())
+                val endRaw = endDayEdit.text.toString().trim()
+                val endD = if (endRaw.isEmpty()) startD else parseEndDayInput(endRaw)
+                val amt = amtEdit.text.toString().trim().toLongOrNull() ?: 0L
+                val kw = kwEdit.text.toString().trim().ifEmpty { title }
+
+                if (title.isNotEmpty() && amt > 0L) {
+                    LedgerStorage.updateFixedExpense(this, item.id, title, startD, endD, amt, kw)
                     refreshUI()
                 } else {
                     Toast.makeText(this, "항목 이름과 금액을 입력해 주세요.", Toast.LENGTH_SHORT).show()
@@ -3975,6 +4092,32 @@ object LedgerStorage {
             )
         )
         saveFixedExpenses(context, current)
+    }
+
+    fun updateFixedExpense(
+        context: Context,
+        id: String,
+        title: String,
+        startDay: Int,
+        endDay: Int,
+        amount: Long,
+        keyword: String
+    ) {
+        val updated = getFixedExpenses(context).map { item ->
+            if (item.id == id) {
+                FixedExpenseItem(
+                    id = item.id,
+                    title = title,
+                    startDay = startDay.coerceIn(1, 30),
+                    endDay = endDay.coerceIn(0, 31),
+                    amount = amount,
+                    keyword = keyword
+                )
+            } else {
+                item
+            }
+        }
+        saveFixedExpenses(context, updated)
     }
 
     fun removeFixedExpense(context: Context, id: String) {
