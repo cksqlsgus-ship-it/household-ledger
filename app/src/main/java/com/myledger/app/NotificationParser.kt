@@ -3,6 +3,12 @@ package com.myledger.app
 import android.content.Context
 import java.util.Locale
 
+enum class FilterDecision {
+    PASS,
+    IGNORE,
+    UNMATCHED
+}
+
 data class ParsedEntry(
     val shouldSave: Boolean,
     val type: String,
@@ -33,6 +39,62 @@ object NotificationParser {
         "기타"
     )
 
+    /**
+     * 통과 / 무시 / 미분류(보류) 3단계 판정:
+     * 1) 무시 단어가 하나라도 있으면 통과 단어가 함께 있어도 무조건 IGNORE
+     * 2) 양식 규칙(ParserTemplate) 일치 시 actionType 에 따라 PASS / IGNORE
+     * 3) 통과/분류/이체 단어 규칙에 일치하면 PASS
+     * 4) 통과 단어도 무시 단어도 없으면 UNMATCHED (설정 탭의 미분류·보류 목록으로 이동)
+     */
+    fun evaluateFilterDecision(context: Context, text: String): FilterDecision {
+        val lower = text.lowercase(Locale.KOREA)
+        if (lower.isBlank()) return FilterDecision.IGNORE
+
+        val rules = LedgerStorage.getAutoRules(context)
+
+        // 1. 무시 단어(ignoreKeywords) 및 무시/삭제 전용 규칙 최우선 검사
+        for (rule in rules) {
+            val ignoreTokens = splitTokens(rule.ignoreKeywords).map { it.lowercase(Locale.KOREA) }
+            if (ignoreTokens.any { lower.contains(it) }) {
+                return FilterDecision.IGNORE
+            }
+
+            if (rule.action == "ignore" || rule.action == "delete") {
+                val delTokens = splitTokens(rule.keyword).map { it.lowercase(Locale.KOREA) }
+                if (delTokens.any { lower.contains(it) }) {
+                    return FilterDecision.IGNORE
+                }
+            }
+        }
+
+        // 2. 커스텀 양식 규칙(ParserTemplate) 검사
+        val templates = LedgerStorage.getParserTemplates(context)
+        val matchedTemplate = findMatchingTemplate(templates, text)
+        if (matchedTemplate != null) {
+            return if (matchedTemplate.actionType == "delete") {
+                FilterDecision.IGNORE
+            } else {
+                FilterDecision.PASS
+            }
+        }
+
+        // 3. 통과(pass) / 이체(transfer) / 카테고리(category) 단어 검사
+        val hasPassOrClassifyMatch = rules.any { rule ->
+            if (rule.action != "pass" && rule.action != "transfer" && rule.action != "category") {
+                return@any false
+            }
+            val passTokens = splitTokens(rule.keyword).map { it.lowercase(Locale.KOREA) }
+            passTokens.any { lower.contains(it) }
+        }
+
+        if (hasPassOrClassifyMatch) {
+            return FilterDecision.PASS
+        }
+
+        // 4. 통과 단어도 없고 무시 단어도 없는 알림
+        return FilterDecision.UNMATCHED
+    }
+
     fun parse(context: Context, title: String, text: String): ParsedEntry {
         val rawCombined = listOf(title.trim(), text.trim())
             .filter { it.isNotEmpty() }
@@ -46,6 +108,27 @@ object NotificationParser {
         val fallbackMerchant = title.trim().ifEmpty {
             cleanedText.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: "기타 내역"
         }
+
+        val rules = LedgerStorage.getAutoRules(context)
+        val decision = evaluateFilterDecision(context, rawCombined)
+
+        if (decision == FilterDecision.IGNORE) {
+            return ParsedEntry(
+                shouldSave = false,
+                type = "exp",
+                category = "기타",
+                merchant = fallbackMerchant,
+                fromAccount = "",
+                toAccount = "",
+                balanceInfo = "",
+                itemSummary = "",
+                totalQuantity = "",
+                amount = 0L,
+                cleanRawText = cleanedText
+            )
+        }
+
+        val classifyRule = findMatchingClassifyRule(rules, rawCombined, cleanedText)
 
         if (matchedTemplate != null) {
             if (matchedTemplate.actionType == "delete") {
@@ -64,16 +147,18 @@ object NotificationParser {
                 )
             }
 
-            val resolvedType = when (matchedTemplate.actionType) {
+            val baseType = when (matchedTemplate.actionType) {
                 "inc" -> "inc"
                 "trn" -> "trn"
                 else -> "exp"
             }
-            val resolvedCategory = if (resolvedType == "trn" && matchedTemplate.category == "기타") {
+            val baseCategory = if (baseType == "trn" && matchedTemplate.category == "기타") {
                 "이체/계좌이동"
             } else {
                 matchedTemplate.category.ifBlank { "기타" }
             }
+
+            val (resolvedType, resolvedCategory) = applyRuleOverride(baseType, baseCategory, classifyRule)
 
             val merchant = extractTextField(
                 source = cleanedText,
@@ -143,12 +228,13 @@ object NotificationParser {
             )
         }
 
-        // 등록된 템플릿이 없을 때의 최소 기본 파서 (첫 금액만 추출)
         val amount = extractFirstNumber(cleanedText)
+        val (resolvedType, resolvedCategory) = applyRuleOverride("exp", "기타", classifyRule)
+
         return ParsedEntry(
-            shouldSave = amount > 0L,
-            type = "exp",
-            category = "기타",
+            shouldSave = (decision == FilterDecision.PASS && amount > 0L),
+            type = resolvedType,
+            category = resolvedCategory,
             merchant = fallbackMerchant,
             fromAccount = "",
             toAccount = "",
@@ -158,6 +244,37 @@ object NotificationParser {
             amount = amount,
             cleanRawText = cleanedText
         )
+    }
+
+    private fun findMatchingClassifyRule(
+        rules: List<AutoRule>,
+        rawText: String,
+        cleanedText: String
+    ): AutoRule? {
+        val hay = "$rawText\n$cleanedText".lowercase(Locale.KOREA)
+        if (hay.isBlank()) return null
+
+        for (rule in rules) {
+            if (rule.action != "transfer" && rule.action != "category") continue
+            val tokens = splitTokens(rule.keyword).map { it.lowercase(Locale.KOREA) }
+            if (tokens.any { hay.contains(it) }) {
+                return rule
+            }
+        }
+        return null
+    }
+
+    private fun applyRuleOverride(
+        baseType: String,
+        baseCategory: String,
+        rule: AutoRule?
+    ): Pair<String, String> {
+        rule ?: return baseType to baseCategory
+        return when (rule.action) {
+            "transfer" -> "trn" to "이체/계좌이동"
+            "category" -> baseType to rule.category.ifBlank { baseCategory }
+            else -> baseType to baseCategory
+        }
     }
 
     private fun findMatchingTemplate(templates: List<ParserTemplate>, text: String): ParserTemplate? {
@@ -298,23 +415,56 @@ object NotificationParser {
     }
 
     private fun parseDigitsToLong(raw: String): Long {
-        val digits = raw.replace(Regex("[^0-9]"), "")
+        val intPart = raw.substringBefore(".")
+        val digits = intPart.replace(Regex("[^0-9]"), "")
         return digits.toLongOrNull() ?: 0L
     }
 
     private fun extractFirstNumber(text: String): Long {
-        val matches = Regex("[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+").findAll(text)
-        for (m in matches) {
-            val valLong = m.value.replace(",", "").toLongOrNull() ?: 0L
+        val currencyMatches = Regex(
+            "(?i)(?:₩|\\$|USD|JPY|EUR|GBP)?\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?\\s*(?:원|KRW|USD|JPY|EUR|GBP)|(?:₩|\\$|USD|JPY|EUR|GBP)\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?"
+        ).findAll(text)
+
+        for (m in currencyMatches) {
+            val rawNum = (m.groups[1]?.value ?: m.groups[2]?.value ?: "").replace(",", "")
+            val valLong = rawNum.toLongOrNull() ?: 0L
+            if (valLong > 0L) return valLong
+        }
+
+        val commaMatches = Regex("([0-9]{1,3}(?:,[0-9]{3})+)(?:\\.[0-9]+)?").findAll(text)
+        for (m in commaMatches) {
+            val valLong = (m.groups[1]?.value ?: "").replace(",", "").toLongOrNull() ?: 0L
+            if (valLong > 0L) return valLong
+        }
+
+        val plainMatches = Regex("([0-9]+)(?:\\.[0-9]+)?").findAll(text)
+        for (m in plainMatches) {
+            val valLong = (m.groups[1]?.value ?: "").toLongOrNull() ?: 0L
             if (valLong > 0L) return valLong
         }
         return 0L
     }
 
     private fun extractLastNumber(text: String): Long {
-        val matches = Regex("[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+").findAll(text).toList()
-        for (m in matches.asReversed()) {
-            val valLong = m.value.replace(",", "").toLongOrNull() ?: 0L
+        val currencyMatches = Regex(
+            "(?i)(?:₩|\\$|USD|JPY|EUR|GBP)?\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?\\s*(?:원|KRW|USD|JPY|EUR|GBP)|(?:₩|\\$|USD|JPY|EUR|GBP)\\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]+)?"
+        ).findAll(text).toList()
+
+        for (m in currencyMatches.asReversed()) {
+            val rawNum = (m.groups[1]?.value ?: m.groups[2]?.value ?: "").replace(",", "")
+            val valLong = rawNum.toLongOrNull() ?: 0L
+            if (valLong > 0L) return valLong
+        }
+
+        val commaMatches = Regex("([0-9]{1,3}(?:,[0-9]{3})+)(?:\\.[0-9]+)?").findAll(text).toList()
+        for (m in commaMatches.asReversed()) {
+            val valLong = (m.groups[1]?.value ?: "").replace(",", "").toLongOrNull() ?: 0L
+            if (valLong > 0L) return valLong
+        }
+
+        val plainMatches = Regex("([0-9]+)(?:\\.[0-9]+)?").findAll(text).toList()
+        for (m in plainMatches.asReversed()) {
+            val valLong = (m.groups[1]?.value ?: "").toLongOrNull() ?: 0L
             if (valLong > 0L) return valLong
         }
         return 0L
