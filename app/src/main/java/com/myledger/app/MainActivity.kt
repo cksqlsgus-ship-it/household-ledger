@@ -293,8 +293,8 @@ class MainActivity : Activity() {
         val trnColor = if (isDark) Color.parseColor("#A78BFA") else Color.parseColor("#7C3AED")
         val nf = NumberFormat.getNumberInstance(Locale.KOREA)
 
-        val accounts = LedgerStorage.getAccounts(this)
-        val activeAccount = selectedAccountId?.let { id -> accounts.firstOrNull { it.id == id } }
+        val accounts: List<AccountItem> = LedgerStorage.getAccounts(this)
+        val activeAccount: AccountItem? = selectedAccountId?.let { id -> accounts.firstOrNull { it.id == id } }
 
         if (activeAccount != null) {
             renderAccountDetailScreen(
@@ -372,8 +372,8 @@ class MainActivity : Activity() {
             for (col in 0 until columns) {
                 val accIndex = idx + col
                 if (accIndex < accounts.size) {
-                    val acc = accounts[accIndex]
-                    val summary = LedgerStorage.calculateAccountSummary(this, acc)
+                    val acc: AccountItem = accounts[accIndex]
+                    val summary: AccountFlowSummary = LedgerStorage.calculateAccountSummary(this, acc)
                     val card = LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
                         background = roundBg(bgCard, 16)
@@ -398,7 +398,7 @@ class MainActivity : Activity() {
                     })
 
                     card.addView(TextView(this).apply {
-                        text = "${nf.format(summary.balance)}원"
+                        text = "${nf.format(summary.balance.toLong())}원"
                         setTextColor(textPrimary)
                         textSize = sp(21f)
                         setTypeface(null, Typeface.BOLD)
@@ -410,14 +410,14 @@ class MainActivity : Activity() {
                         orientation = LinearLayout.HORIZONTAL
                     }
                     flowRow.addView(TextView(this).apply {
-                        text = "유입 +${nf.format(summary.inflow)}원"
+                        text = "유입 +${nf.format(summary.inflow.toLong())}원"
                         setTextColor(incColor)
                         textSize = sp(11.5f)
                         setTypeface(null, Typeface.BOLD)
                         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                     })
                     flowRow.addView(TextView(this).apply {
-                        text = "유출 -${nf.format(summary.outflow)}원"
+                        text = "유출 -${nf.format(summary.outflow.toLong())}원"
                         setTextColor(expColor)
                         textSize = sp(11.5f)
                         setTypeface(null, Typeface.BOLD)
@@ -452,7 +452,7 @@ class MainActivity : Activity() {
         nf: NumberFormat
     ) {
         val isDark = LedgerStorage.isDarkMode(this)
-        val summary = LedgerStorage.calculateAccountSummary(this, account)
+        val summary: AccountFlowSummary = LedgerStorage.calculateAccountSummary(this, account)
 
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -511,7 +511,7 @@ class MainActivity : Activity() {
         })
 
         detailSummaryCard.addView(TextView(this).apply {
-            text = "${nf.format(summary.balance)}원"
+            text = "${nf.format(summary.balance.toLong())}원"
             setTextColor(textPrimary)
             textSize = sp(25f)
             setTypeface(null, Typeface.BOLD)
@@ -524,14 +524,14 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         ioRow.addView(TextView(this).apply {
-            text = "유입 +${nf.format(summary.inflow)}원"
+            text = "유입 +${nf.format(summary.inflow.toLong())}원"
             setTextColor(incColor)
             textSize = sp(13f)
             setTypeface(null, Typeface.BOLD)
             setPadding(dp(10), 0, dp(10), 0)
         })
         ioRow.addView(TextView(this).apply {
-            text = "유출 -${nf.format(summary.outflow)}원"
+            text = "유출 -${nf.format(summary.outflow.toLong())}원"
             setTextColor(expColor)
             textSize = sp(13f)
             setTypeface(null, Typeface.BOLD)
@@ -540,7 +540,7 @@ class MainActivity : Activity() {
         detailSummaryCard.addView(ioRow)
 
         detailSummaryCard.addView(TextView(this).apply {
-            text = "시작 잔액 ${nf.format(account.initialBalance)}원 · 키워드: ${account.keywords}"
+            text = "시작 잔액 ${nf.format(account.initialBalance.toLong())}원 · 키워드: ${account.keywords}"
             setTextColor(textSecondary)
             textSize = sp(11f)
             gravity = Gravity.CENTER
@@ -598,15 +598,16 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(6), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 hint = hintStr
                 textSize = sp(14f)
                 if (isSignedNumber) {
                     inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
                 }
                 styleDialogEditText(this, isDark)
-                box.addView(this)
             }
+            box.addView(edit)
+            return edit
         }
 
         val nameEdit = addField("통장 이름", "예: 월급 통장, 생활비 통장, 여가 통장")
@@ -655,15 +656,16 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(6), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 setText(initial)
                 textSize = sp(14f)
                 if (isSignedNumber) {
                     inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_SIGNED
                 }
                 styleDialogEditText(this, isDark)
-                box.addView(this)
             }
+            box.addView(edit)
+            return edit
         }
 
         val nameEdit = addField("통장 이름", account.name)
@@ -1742,7 +1744,7 @@ class MainActivity : Activity() {
                 })
 
                 legRow.addView(TextView(this).apply {
-                    text = "${nf.format(slice.value)}원"
+                    text = "${nf.format(slice.value.toLong())}원"
                     setTextColor(textSecondary)
                     textSize = sp(12f)
                     setTypeface(null, Typeface.BOLD)
@@ -1849,7 +1851,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         })
         summaryCard.addView(TextView(this).apply {
-            text = "${nf.format(plannedTotal)}원"
+            text = "${nf.format(plannedTotal.toLong())}원"
             setTextColor(textPrimary)
             textSize = sp(22f)
             setTypeface(null, Typeface.BOLD)
@@ -1862,14 +1864,14 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
         subRow.addView(TextView(this).apply {
-            text = "완료 ${nf.format(doneTotal)}원"
+            text = "완료 ${nf.format(doneTotal.toLong())}원"
             setTextColor(incColor)
             textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
             setPadding(dp(8), 0, dp(8), 0)
         })
         subRow.addView(TextView(this).apply {
-            text = "남은 예정 ${nf.format(remainingTotal)}원"
+            text = "남은 예정 ${nf.format(remainingTotal.toLong())}원"
             setTextColor(expColor)
             textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
@@ -1979,7 +1981,7 @@ class MainActivity : Activity() {
             topLine.addView(infoCol)
 
             topLine.addView(TextView(this).apply {
-                text = "${nf.format(effectiveAmt)}원"
+                text = "${nf.format(effectiveAmt.toLong())}원"
                 setTextColor(if (isDone) incColor else expColor)
                 textSize = sp(14f)
                 setTypeface(null, Typeface.BOLD)
@@ -2023,7 +2025,7 @@ class MainActivity : Activity() {
                             merchant = fe.title,
                             fromAccount = "",
                             toAccount = "",
-                            item = "• ${fe.title} (1건) : ${nf.format(fe.amount)}원",
+                            item = "• ${fe.title} (1건) : ${nf.format(fe.amount.toLong())}원",
                             quantity = "1건",
                             amount = fe.amount,
                             dateStr = dStr,
@@ -2088,13 +2090,14 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(6), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 hint = hintStr
                 textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
                 styleDialogEditText(this, isDark)
-                box.addView(this)
             }
+            box.addView(edit)
+            return edit
         }
 
         val titleEdit = addField("고정 지출 이름", "예: 월세, 관리비, 통신비, 유튜브")
@@ -2195,14 +2198,15 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(6), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 setText(initialValue)
                 hint = hintStr
                 textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
                 styleDialogEditText(this, isDark)
-                box.addView(this)
             }
+            box.addView(edit)
+            return edit
         }
 
         val titleEdit = addField("고정 지출 이름", item.title, "예: 월세, 관리비, 통신비, 유튜브")
@@ -2640,7 +2644,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
             })
             addView(TextView(this@MainActivity).apply {
-                text = "${nf.format(totalInc - totalExp)}원"
+                text = "${nf.format((totalInc - totalExp).toLong())}원"
                 setTextColor(textPrimary)
                 textSize = sp(if (compact) 21f else 25f)
                 setTypeface(null, Typeface.BOLD)
@@ -2653,14 +2657,14 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER
             }
             row.addView(TextView(this@MainActivity).apply {
-                text = "+${nf.format(totalInc)}원"
+                text = "+${nf.format(totalInc.toLong())}원"
                 setTextColor(incColor)
                 textSize = sp(if (compact) 12f else 14f)
                 setTypeface(null, Typeface.BOLD)
                 setPadding(dp(8), 0, dp(8), 0)
             })
             row.addView(TextView(this@MainActivity).apply {
-                text = "-${nf.format(totalExp)}원"
+                text = "-${nf.format(totalExp.toLong())}원"
                 setTextColor(expColor)
                 textSize = sp(if (compact) 12f else 14f)
                 setTypeface(null, Typeface.BOLD)
@@ -2668,7 +2672,7 @@ class MainActivity : Activity() {
             })
             if (totalTrn > 0L) {
                 row.addView(TextView(this@MainActivity).apply {
-                    text = "⇄${nf.format(totalTrn)}원"
+                    text = "⇄${nf.format(totalTrn.toLong())}원"
                     setTextColor(trnColor)
                     textSize = sp(if (compact) 12f else 14f)
                     setTypeface(null, Typeface.BOLD)
@@ -2799,7 +2803,7 @@ class MainActivity : Activity() {
                 })
             }
             rightCol.addView(TextView(this).apply {
-                text = "$sign${nf.format(amount)}원"
+                text = "$sign${nf.format(amount.toLong())}원"
                 setTextColor(entryColor)
                 textSize = sp(if (compact) 13f else 15f)
                 setTypeface(null, Typeface.BOLD)
@@ -2889,7 +2893,7 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(6), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 hint = hintStr
                 textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
@@ -2898,8 +2902,9 @@ class MainActivity : Activity() {
                     isSingleLine = false
                 }
                 styleDialogEditText(this, isDark)
-                container.addView(this)
             }
+            container.addView(edit)
+            return edit
         }
 
         val merchantInput = makeInput("제목 / 결제처", "예: 쿠팡, Google Play, 농협 → 토뱅이정현")
@@ -3322,7 +3327,7 @@ class MainActivity : Activity() {
                 setTypeface(null, Typeface.BOLD)
                 setPadding(0, dp(8), 0, dp(3))
             })
-            return EditText(this).apply {
+            val edit = EditText(this).apply {
                 setText(initial)
                 textSize = sp(14f)
                 if (isNumber) inputType = InputType.TYPE_CLASS_NUMBER
@@ -3331,8 +3336,9 @@ class MainActivity : Activity() {
                     isSingleLine = false
                 }
                 styleDialogEditText(this, isDark)
-                container.addView(this)
             }
+            container.addView(edit)
+            return edit
         }
 
         val merchantEdit = makeLabeledInput("제목 / 이동 경로", oldMerchant)
