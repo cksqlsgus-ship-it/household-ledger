@@ -1404,7 +1404,7 @@ class MainActivity : Activity() {
         }
 
         container.addView(TextView(this).apply {
-            text = "내역 ${filteredList.size}건 (눌러서 상세 · 수정)"
+            text = "내역 ${filteredList.size}건 · 최신순 (눌러서 상세 · 수정)"
             setTextColor(textSecondary)
             textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
@@ -1756,7 +1756,7 @@ class MainActivity : Activity() {
         rightContent.addView(pieCard)
 
         rightContent.addView(TextView(this).apply {
-            text = "[$selectedAnalysisCategory] 내역 ${targetRecords.size}건"
+            text = "[$selectedAnalysisCategory] 내역 ${targetRecords.size}건 · 최신순"
             setTextColor(textSecondary)
             textSize = sp(12f)
             setTypeface(null, Typeface.BOLD)
@@ -2694,7 +2694,9 @@ class MainActivity : Activity() {
         nf: NumberFormat,
         compact: Boolean
     ) {
-        if (records.isEmpty()) {
+        val sortedRecords = records.sortedByDescending { getRecordTimestamp(it) }
+
+        if (sortedRecords.isEmpty()) {
             targetContainer.addView(TextView(this).apply {
                 text = "해당 조건의 내역이 없습니다."
                 setTextColor(textSecondary)
@@ -2705,7 +2707,7 @@ class MainActivity : Activity() {
             return
         }
 
-        for (obj in records) {
+        for (obj in sortedRecords) {
             val type = obj.optString("type", "exp")
             val category = obj.optString("category", "기타")
             val merchant = obj.optString("merchant", obj.optString("desc", ""))
